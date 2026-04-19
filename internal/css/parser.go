@@ -196,19 +196,8 @@ func (p *Parser) block(dst []Token) ([]Token, error) {
 	if tok.Kind == EOFKind {
 		return dst, err
 	}
-	var name string
-	var end Kind
-	switch tok.Kind {
-	case LParenKind:
-		name = "()"
-		end = RParenKind
-	case LBracketKind:
-		name = "[]"
-		end = RBracketKind
-	case LBraceKind:
-		name = "{}"
-		end = RBraceKind
-	default:
+	name, end, isBlock := blockKind(tok.Kind)
+	if !isBlock || tok.Kind == FunctionKind {
 		p.prev()
 		return dst, fmt.Errorf("parse css block: expected (/[/{ (found %v)", tok)
 	}
@@ -288,23 +277,15 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 	}
 }
 
-// A Rule is a set of tokens followed by a {}-block.
-// It may optionally start with an at-keyword.
-type Rule struct {
-	AtRule     string
-	AtLocation Location
-	Prelude    []Token
-	Block      []Token
-}
-
-// AtKeyword returns the rule's at-keyword token, if present.
-func (rule *Rule) AtKeyword() (Token, bool) {
-	if rule.AtRule == "" {
-		return Token{}, false
+func (p *Parser) whitespace() {
+	for {
+		tok, err := p.next()
+		if err != nil {
+			return
+		}
+		if tok.Kind != WhitespaceKind {
+			p.prev()
+			return
+		}
 	}
-	return Token{
-		Kind:  AtKeywordKind,
-		Value: rule.AtRule,
-		Start: rule.AtLocation,
-	}, true
 }

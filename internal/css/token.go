@@ -130,6 +130,21 @@ func kindSymbol(k Kind) (string, bool) {
 	}
 }
 
+func blockKind(k Kind) (name string, end Kind, ok bool) {
+	switch k {
+	case LParenKind:
+		return "()", RParenKind, true
+	case LBracketKind:
+		return "[]", RBracketKind, true
+	case LBraceKind:
+		return "{}", RBraceKind, true
+	case FunctionKind:
+		return "function", RParenKind, true
+	default:
+		return "", EOFKind, false
+	}
+}
+
 // Location gives position information in a stream.
 type Location struct {
 	// Offset is the offset of the byte
