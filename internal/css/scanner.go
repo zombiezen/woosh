@@ -614,6 +614,9 @@ func (s *Scanner) consumeLiteral(lit string) bool {
 		}
 		next = next[1:]
 	}
+	for range len(lit) {
+		s.r.ReadRune()
+	}
 	return true
 }
 

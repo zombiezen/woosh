@@ -45,62 +45,22 @@ func (tok Token) IsInteger() bool {
 
 // String formats the token in CSS syntax.
 func (tok Token) String() string {
+	if s, ok := kindSymbol(tok.Kind); ok {
+		return s
+	}
+	if !isKnownKind(tok.Kind) {
+		return fmt.Sprintf("/*kind=%v value=%s*/", tok.Kind, tok.Value)
+	}
+
 	switch tok.Kind {
 	case EOFKind:
 		return "/*EOF*/"
-	case IdentKind:
-		// TODO(soon): Escape.
-		return tok.Value
 	case WhitespaceKind:
 		return "/*space*/"
-	case FunctionKind:
-		// TODO(soon): Escape.
-		return tok.Value + "("
-	case AtKeywordKind:
-		// TODO(soon): Escape.
-		return "@" + tok.Value
-	case HashKind:
-		// TODO(soon): Escape.
-		return "#" + tok.Value
-	case StringKind, BadStringKind:
-		// TODO(maybe): Any other escapes?
-		return `"` + strings.ReplaceAll(tok.Value, `"`, `\"`) + `"`
-	case URLKind, BadURLKind:
-		// TODO(soon): Escape.
-		return "url(" + tok.Value + ")"
-	case DelimKind:
-		return tok.Value
-	case NumberKind:
-		return tok.Value
-	case PercentageKind:
-		return tok.Value + "%"
-	case DimensionKind:
-		// TODO(soon): Escape.
-		return tok.Value + tok.Unit
-	case CDOKind:
-		return "<!--"
-	case CDCKind:
-		return "-->"
-	case ColonKind:
-		return ":"
-	case SemicolonKind:
-		return ";"
-	case CommaKind:
-		return ","
-	case LBracketKind:
-		return "["
-	case RBracketKind:
-		return "]"
-	case LParenKind:
-		return "("
-	case RParenKind:
-		return ")"
-	case LBraceKind:
-		return "{"
-	case RBraceKind:
-		return "}"
 	default:
-		return fmt.Sprintf("/*kind=%v value=%s*/", tok.Kind, tok.Value)
+		sb := new(strings.Builder)
+		NewWriter(sb).WriteToken(tok)
+		return sb.String()
 	}
 }
 
@@ -135,6 +95,39 @@ const (
 	LBraceKind                 // {
 	RBraceKind                 // }
 )
+
+func isKnownKind(k Kind) bool {
+	return EOFKind <= k && k <= RBraceKind
+}
+
+func kindSymbol(k Kind) (string, bool) {
+	switch k {
+	case CDOKind:
+		return "<!--", true
+	case CDCKind:
+		return "-->", true
+	case ColonKind:
+		return ":", true
+	case SemicolonKind:
+		return ";", true
+	case CommaKind:
+		return ",", true
+	case LBracketKind:
+		return "[", true
+	case RBracketKind:
+		return "]", true
+	case LParenKind:
+		return "(", true
+	case RParenKind:
+		return ")", true
+	case LBraceKind:
+		return "{", true
+	case RBraceKind:
+		return "}", true
+	default:
+		return "", false
+	}
+}
 
 // Location gives position information in a stream.
 type Location struct {
