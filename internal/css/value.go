@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
 )
 
 var (
@@ -26,6 +27,11 @@ func (v Value) Kind() Kind {
 		return EOFKind
 	}
 	return v[0].Kind
+}
+
+// Tokens returns an iterator over the tokens that this value represents.
+func (v Value) Tokens() iter.Seq[Token] {
+	return slices.Values(v)
 }
 
 // IsValid reports whether v holds a single valid CSS component value.
