@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // A Writer writes CSS tokens to an [io.Writer].
@@ -105,8 +107,10 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 		if _, err := w.w.WriteString(`"`); err != nil {
 			return err
 		}
-		// TODO(maybe): Any other escapes?
-		if _, err := w.w.WriteString(strings.ReplaceAll(tok.Value, `"`, `\"`)); err != nil {
+		err := escape(w.w, tok.Value, func(r rune) bool {
+			return r == '"' || r == '\\' || r == '\n'
+		})
+		if err != nil {
 			return err
 		}
 		if _, err := w.w.WriteString(`"`); err != nil {
@@ -116,14 +120,19 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 		if _, err := w.w.WriteString("url("); err != nil {
 			return err
 		}
-		// TODO(soon): Escape.
-		if _, err := w.w.WriteString(tok.Value); err != nil {
+		err := escape(w.w, tok.Value, func(r rune) bool {
+			return isWhitespace(r) || strings.ContainsRune(`"'()\`, r) || isNonPrintable(r)
+		})
+		if err != nil {
 			return err
 		}
 		if _, err := w.w.WriteString(")"); err != nil {
 			return err
 		}
 	case DelimKind:
+		if !isValidDelimiter(tok.Value) {
+			return fmt.Errorf("write token: invalid delimiter %q", tok.Value)
+		}
 		if _, err := w.w.WriteString(tok.Value); err != nil {
 			return err
 		}
@@ -133,9 +142,15 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 			}
 		}
 	case NumberKind:
+		if !isValidNumber(tok.Value) {
+			return fmt.Errorf("write token: invalid number %q", tok.Value)
+		}
 		_, err := w.w.WriteString(tok.Value)
 		return err
 	case PercentageKind:
+		if !isValidNumber(tok.Value) {
+			return fmt.Errorf("write token: invalid number %q", tok.Value)
+		}
 		if _, err := w.w.WriteString(tok.Value); err != nil {
 			return err
 		}
@@ -144,11 +159,22 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 		}
 		return nil
 	case DimensionKind:
+		if !isValidNumber(tok.Value) {
+			return fmt.Errorf("write token: invalid number %q", tok.Value)
+		}
 		if _, err := w.w.WriteString(tok.Value); err != nil {
 			return err
 		}
-		// TODO(soon): Escape.
-		if _, err := w.w.WriteString(tok.Unit); err != nil {
+		if len(tok.Unit) >= 2 &&
+			(tok.Unit[0] == 'e' || tok.Unit[0] == 'E') &&
+			(tok.Unit[1] == '-' || isDigit(rune(tok.Unit[1]))) {
+			// Special case: unit could be parsed as an exponent.
+			// Prepend backslash to escape the "e", which forces identifier parsing.
+			if _, err := w.w.WriteString(`\`); err != nil {
+				return err
+			}
+		}
+		if err := writeIdent(w.w, tok.Unit); err != nil {
 			return err
 		}
 	default:
@@ -163,6 +189,9 @@ func writeIdent(w stringWriter, s string) error {
 		return errors.New("write token: empty identifier")
 	}
 
+	// Fast path: if we don't need any escapes, pass through s.
+	// isIdentStart and isIdent return true for any non-ASCII character,
+	// so we can operate on bytes without decoding UTF-8.
 	switch {
 	case isIdentStart(rune(s[0])) || s[0] == '-' && len(s) > 2 && (isIdentStart(rune(s[1])) || s[1] == '-'):
 		needsEscape := false
@@ -188,51 +217,90 @@ func writeIdent(w stringWriter, s string) error {
 		return err
 	}
 
-	// Needs some escapes. Get the start out of the way.
-	switch {
-	case isIdentStart(rune(s[0])):
-		if _, err := w.WriteString(s[:1]); err != nil {
+	// Slow path: we need escapes.
+	// Write out the first code point or two, since that's different from rest of string.
+	if r0, size0 := utf8.DecodeRuneInString(s); isIdentStart(r0) {
+		if _, err := w.WriteString(s[:size0]); err != nil {
 			return err
 		}
-		s = s[1:]
-	case len(s) > 2 && s[0] == '-' && (isIdentStart(rune(s[1])) || s[1] == '-'):
-		if _, err := w.WriteString(s[:2]); err != nil {
+		s = s[size0:]
+	} else if r0 == '-' {
+		r1, size1 := utf8.DecodeRuneInString(s[size0:])
+		if isIdentStart(r1) || r1 == '-' {
+			if _, err := w.WriteString(s[:size0+size1]); err != nil {
+				return err
+			}
+			s = s[size0+size1:]
+		} else {
+			escapeSeq := appendEscape(make([]byte, 0, maxEscapeLength), r0)
+			if _, err := w.Write(escapeSeq); err != nil {
+				return err
+			}
+			s = s[size0:]
+		}
+	} else {
+		escapeSeq := appendEscape(make([]byte, 0, maxEscapeLength), r0)
+		if _, err := w.Write(escapeSeq); err != nil {
 			return err
 		}
-		s = s[2:]
-	default:
-		if err := writeEscape(w, s[0]); err != nil {
-			return err
-		}
-		s = s[1:]
+		s = s[size0:]
 	}
+	// Now the rest of the string can be escaped uniformly.
+	return escape(w, s, func(r rune) bool { return !isIdent(r) })
+}
 
-	// Write non-start characters out of the way.
-	// Try to minimize the number of write calls.
-	last := 0
-	for i, b := range []byte(s) {
-		if !isIdent(rune(b)) {
-			if _, err := w.WriteString(s[last:i]); err != nil {
+// escape writes s to w, escaping every rune for which needsEscape reports true
+// with [appendEscape].
+func escape(w stringWriter, s string, needsEscape func(rune) bool) error {
+	buf := make([]byte, 0, maxEscapeLength)
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if size == 0 {
+			break
+		}
+		if needsEscape(r) {
+			if _, err := w.WriteString(s[:i]); err != nil {
 				return err
 			}
-			if err := writeEscape(w, b); err != nil {
+			buf = appendEscape(buf[:0], r)
+			if _, err := w.Write(buf); err != nil {
 				return err
 			}
-			last = i + 1
+			s = s[i+size:]
+			i = 0
+		} else {
+			i += size
 		}
 	}
-	_, err := w.WriteString(s[last:])
+	if len(s) == 0 {
+		return nil
+	}
+	_, err := w.WriteString(s)
 	return err
 }
 
-func writeEscape(w io.Writer, b byte) error {
-	if isNonPrintable(rune(b)) {
-		_, err := w.Write([]byte{'\\', b})
-		return err
-	}
+// maxEscapeLength is the maximum number of bytes appended by [appendEscape].
+const maxEscapeLength = len(`\`) + max(utf8.UTFMax, len("ff "))
+
+// appendEscape appends the escape for the given code point to w.
+func appendEscape(dst []byte, r rune) []byte {
 	const hexDigits = "0123456789abcdef"
-	_, err := w.Write([]byte{'\\', hexDigits[b>>4], hexDigits[b&0xf], ' '})
-	return err
+	dst = append(dst, '\\')
+	if _, isHex := hexDigit(r); !isHex && r >= '!' && r != 0x7f {
+		// Printable and not a hex digit. Can use directly.
+		return utf8.AppendRune(dst, r)
+	}
+	start := len(dst)
+	for {
+		dst = append(dst, hexDigits[r&0xf])
+		r >>= 4
+		if r == 0 {
+			break
+		}
+	}
+	slices.Reverse(dst[start:])
+	dst = append(dst, ' ')
+	return dst
 }
 
 func requiresCommentSeparator(t1, t2 Token) bool {

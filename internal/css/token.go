@@ -40,6 +40,7 @@ func (tok Token) IsUnrestrictedHash() bool {
 // IsInteger reports whether the token is a [NumberKind] or [DimensionKind] with an integral value.
 func (tok Token) IsInteger() bool {
 	return (tok.Kind == NumberKind || tok.Kind == DimensionKind) &&
+		isValidNumber(tok.Value) &&
 		!strings.ContainsAny(tok.Value, ".eE")
 }
 
@@ -136,6 +137,59 @@ type Location struct {
 	Offset int64
 	// Line is the 1-based line number of the location.
 	Line int64
+}
+
+func isValidNumber(s string) bool {
+	if len(s) >= 1 && (s[0] == '+' || s[0] == '-') {
+		s = s[1:]
+	}
+	if rest, startsWithDigits := cutDigitPrefix(s); startsWithDigits {
+		s = rest
+		if len(s) >= 1 && s[0] == '.' {
+			var hasFraction bool
+			s, hasFraction = cutDigitPrefix(s[1:])
+			if !hasFraction {
+				return false
+			}
+		}
+	} else if len(s) >= 2 && s[0] == '.' && isDigit(rune(s[1])) {
+		s = s[2:]
+		s, _ = cutDigitPrefix(s)
+	} else {
+		return false
+	}
+	if len(s) >= 1 && (s[0] == 'e' || s[0] == 'E') {
+		s = s[1:]
+		if len(s) >= 1 && (s[0] == '+' || s[0] == '-') {
+			s = s[1:]
+		}
+		var hasExponent bool
+		s, hasExponent = cutDigitPrefix(s)
+		if !hasExponent {
+			return false
+		}
+	}
+	return len(s) == 0
+}
+
+func cutDigitPrefix(s string) (string, bool) {
+	cut := false
+	for len(s) >= 1 && isDigit(rune(s[0])) {
+		s = s[1:]
+		cut = true
+	}
+	return s, cut
+}
+
+func isValidDelimiter(s string) bool {
+	if len(s) != 1 {
+		return false
+	}
+	r := s[0]
+	return isASCII(rune(r)) &&
+		!isIdentStart(rune(r)) &&
+		!isDigit(rune(r)) &&
+		strings.IndexByte(`"'(){}[],:;`, r) == -1
 }
 
 const maxTokenSize = 1024

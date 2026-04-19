@@ -744,7 +744,11 @@ func isIdentStart(r rune) bool {
 	return 'A' <= r && r <= 'Z' ||
 		'a' <= r && r <= 'z' ||
 		r == '_' ||
-		r >= 0x80
+		!isASCII(r)
+}
+
+func isASCII(r rune) bool {
+	return 0 <= r && r < 0x80
 }
 
 // startsWithIdentSequence reports whether the slice [starts with an ident sequence].

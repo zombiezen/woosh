@@ -242,6 +242,20 @@ var scannerTests = []struct {
 			{Kind: RBraceKind, Start: Location{Line: 1, Offset: 18}},
 		},
 	},
+	{
+		name:   "EscapeNewlineInString",
+		source: "'foo\\\nbar'",
+		want: []Token{
+			{Kind: StringKind, Value: "foobar", Start: Location{Line: 1, Offset: 0}},
+		},
+	},
+	{
+		name:   "EscapeNewlineCodePointInString",
+		source: `'foo\0a bar'`,
+		want: []Token{
+			{Kind: StringKind, Value: "foo\nbar", Start: Location{Line: 1, Offset: 0}},
+		},
+	},
 }
 
 func TestScanner(t *testing.T) {
