@@ -4,6 +4,7 @@ package css
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -40,6 +41,67 @@ func (tok Token) IsUnrestrictedHash() bool {
 func (tok Token) IsInteger() bool {
 	return (tok.Kind == NumberKind || tok.Kind == DimensionKind) &&
 		!strings.ContainsAny(tok.Value, ".eE")
+}
+
+// String formats the token in CSS syntax.
+func (tok Token) String() string {
+	switch tok.Kind {
+	case EOFKind:
+		return "/*EOF*/"
+	case IdentKind:
+		// TODO(soon): Escape.
+		return tok.Value
+	case WhitespaceKind:
+		return "/*space*/"
+	case FunctionKind:
+		// TODO(soon): Escape.
+		return tok.Value + "("
+	case AtKeywordKind:
+		// TODO(soon): Escape.
+		return "@" + tok.Value
+	case HashKind:
+		// TODO(soon): Escape.
+		return "#" + tok.Value
+	case StringKind, BadStringKind:
+		// TODO(maybe): Any other escapes?
+		return `"` + strings.ReplaceAll(tok.Value, `"`, `\"`) + `"`
+	case URLKind, BadURLKind:
+		// TODO(soon): Escape.
+		return "url(" + tok.Value + ")"
+	case DelimKind:
+		return tok.Value
+	case NumberKind:
+		return tok.Value
+	case PercentageKind:
+		return tok.Value + "%"
+	case DimensionKind:
+		// TODO(soon): Escape.
+		return tok.Value + tok.Unit
+	case CDOKind:
+		return "<!--"
+	case CDCKind:
+		return "-->"
+	case ColonKind:
+		return ":"
+	case SemicolonKind:
+		return ";"
+	case CommaKind:
+		return ","
+	case LBracketKind:
+		return "["
+	case RBracketKind:
+		return "]"
+	case LParenKind:
+		return "("
+	case RParenKind:
+		return ")"
+	case LBraceKind:
+		return "{"
+	case RBraceKind:
+		return "}"
+	default:
+		return fmt.Sprintf("/*kind=%v value=%s*/", tok.Kind, tok.Value)
+	}
 }
 
 // Kind is an enumeration of [Token] types.
