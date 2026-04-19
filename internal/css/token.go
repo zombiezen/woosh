@@ -14,7 +14,10 @@ import (
 type Token struct {
 	Kind  Kind
 	Value string
-	Unit  string
+	// Unit is the unit of the value for [DimensionKind].
+	Unit string
+	// Start is the location of the first byte of the token.
+	Start Location
 }
 
 // IsIDHash reports whether the token is a [hash token]
@@ -70,6 +73,15 @@ const (
 	LBraceKind                 // {
 	RBraceKind                 // }
 )
+
+// Location gives position information in a stream.
+type Location struct {
+	// Offset is the offset of the byte
+	// relative to the beginning of the stream.
+	Offset int64
+	// Line is the 1-based line number of the location.
+	Line int64
+}
 
 const maxTokenSize = 1024
 

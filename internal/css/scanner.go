@@ -32,6 +32,7 @@ func (s *Scanner) Next() (Token, error) {
 	if err := s.comments(); err != nil {
 		return Token{}, err
 	}
+	start := s.r.location()
 	r, _, err := s.r.ReadRune()
 	if err != nil {
 		return Token{}, err
@@ -39,9 +40,9 @@ func (s *Scanner) Next() (Token, error) {
 	switch {
 	case isWhitespace(r):
 		s.consumeWhitespace()
-		return Token{Kind: WhitespaceKind}, nil
+		return Token{Kind: WhitespaceKind, Start: start}, nil
 	case r == '"' || r == '\'':
-		return s.string(r)
+		return s.string(start, r)
 	case r == '#':
 		if next, _ := s.r.peek(2); len(next) >= 1 && isIdent(next[0]) || startsWithValidEscape(next) {
 			tb := new(tokenBuilder)
@@ -53,32 +54,34 @@ func (s *Scanner) Next() (Token, error) {
 			return Token{
 				Kind:  HashKind,
 				Value: value,
+				Start: start,
 			}, err
 		}
 		return Token{
 			Kind:  DelimKind,
 			Value: "#",
+			Start: start,
 		}, nil
 	case r == '(':
-		return Token{Kind: LParenKind}, nil
+		return Token{Kind: LParenKind, Start: start}, nil
 	case r == ')':
-		return Token{Kind: RParenKind}, nil
+		return Token{Kind: RParenKind, Start: start}, nil
 	case r == '+':
 		s.r.UnreadRune()
 		if s.startsWithNumber() {
 			return s.numeric()
 		}
 		s.r.ReadRune()
-		return Token{Kind: DelimKind, Value: "+"}, nil
+		return Token{Kind: DelimKind, Value: "+", Start: start}, nil
 	case r == ',':
-		return Token{Kind: CommaKind}, nil
+		return Token{Kind: CommaKind, Start: start}, nil
 	case r == '-':
 		s.r.UnreadRune()
 		if s.startsWithNumber() {
 			return s.numeric()
 		}
 		if s.consumeLiteral("-->") {
-			return Token{Kind: CDCKind}, nil
+			return Token{Kind: CDCKind, Start: start}, nil
 		}
 		if s.startsWithIdentSequence() {
 			return s.ident()
@@ -87,6 +90,7 @@ func (s *Scanner) Next() (Token, error) {
 		return Token{
 			Kind:  DelimKind,
 			Value: "-",
+			Start: start,
 		}, nil
 	case r == '.':
 		s.r.UnreadRune()
@@ -97,16 +101,17 @@ func (s *Scanner) Next() (Token, error) {
 		return Token{
 			Kind:  DelimKind,
 			Value: ".",
+			Start: start,
 		}, nil
 	case r == ':':
-		return Token{Kind: ColonKind}, nil
+		return Token{Kind: ColonKind, Start: start}, nil
 	case r == ';':
-		return Token{Kind: SemicolonKind}, nil
+		return Token{Kind: SemicolonKind, Start: start}, nil
 	case r == '<':
 		if s.consumeLiteral("!--") {
-			return Token{Kind: CDOKind}, nil
+			return Token{Kind: CDOKind, Start: start}, nil
 		}
-		return Token{Kind: DelimKind, Value: "<"}, nil
+		return Token{Kind: DelimKind, Value: "<", Start: start}, nil
 	case r == '@':
 		if s.startsWithIdentSequence() {
 			tb := new(tokenBuilder)
@@ -118,11 +123,12 @@ func (s *Scanner) Next() (Token, error) {
 			return Token{
 				Kind:  AtKeywordKind,
 				Value: value,
+				Start: start,
 			}, err
 		}
-		return Token{Kind: DelimKind, Value: "@"}, nil
+		return Token{Kind: DelimKind, Value: "@", Start: start}, nil
 	case r == '[':
-		return Token{Kind: LBracketKind}, nil
+		return Token{Kind: LBracketKind, Start: start}, nil
 	case r == '\\':
 		s.r.UnreadRune()
 		if !s.startsWithValidEscape() {
@@ -130,15 +136,16 @@ func (s *Scanner) Next() (Token, error) {
 			return Token{
 				Kind:  DelimKind,
 				Value: "\\",
+				Start: start,
 			}, err
 		}
 		return s.ident()
 	case r == ']':
-		return Token{Kind: RBracketKind}, nil
+		return Token{Kind: RBracketKind, Start: start}, nil
 	case r == '{':
-		return Token{Kind: LBraceKind}, nil
+		return Token{Kind: LBraceKind, Start: start}, nil
 	case r == '}':
-		return Token{Kind: RBraceKind}, nil
+		return Token{Kind: RBraceKind, Start: start}, nil
 	case isDigit(r):
 		s.r.UnreadRune()
 		return s.numeric()
@@ -146,11 +153,12 @@ func (s *Scanner) Next() (Token, error) {
 		s.r.UnreadRune()
 		return s.ident()
 	default:
-		return Token{Kind: DelimKind, Value: string(r)}, nil
+		return Token{Kind: DelimKind, Value: string(r), Start: start}, nil
 	}
 }
 
 func (s *Scanner) ident() (Token, error) {
+	start := s.r.location()
 	tb := new(tokenBuilder)
 	s.consumeIdent(tb)
 
@@ -160,11 +168,12 @@ func (s *Scanner) ident() (Token, error) {
 		if err != nil {
 			err = fmt.Errorf("parse function: %w", err)
 		} else if isASCIICaseInsensitiveMatch(value, "url") {
-			return s.url(tb)
+			return s.url(tb, start)
 		}
 		return Token{
 			Kind:  FunctionKind,
 			Value: value,
+			Start: start,
 		}, err
 	}
 
@@ -175,10 +184,11 @@ func (s *Scanner) ident() (Token, error) {
 	return Token{
 		Kind:  IdentKind,
 		Value: value,
+		Start: start,
 	}, err
 }
 
-func (s *Scanner) url(tb *tokenBuilder) (Token, error) {
+func (s *Scanner) url(tb *tokenBuilder, start Location) (Token, error) {
 	for {
 		if next, _ := s.r.peek(2); len(next) >= 2 && isWhitespace(next[0]) && isWhitespace(next[1]) {
 			s.r.ReadRune()
@@ -195,6 +205,7 @@ func (s *Scanner) url(tb *tokenBuilder) (Token, error) {
 		return Token{
 			Kind:  FunctionKind,
 			Value: value,
+			Start: start,
 		}, err
 	}
 
@@ -211,6 +222,7 @@ urlChars:
 			return Token{
 				Kind:  URLKind,
 				Value: value,
+				Start: start,
 			}, err
 		}
 		switch {
@@ -222,6 +234,7 @@ urlChars:
 			return Token{
 				Kind:  URLKind,
 				Value: value,
+				Start: start,
 			}, err
 		case isWhitespace(r):
 			s.consumeWhitespace()
@@ -261,6 +274,7 @@ urlChars:
 			return Token{
 				Kind:  BadURLKind,
 				Value: value,
+				Start: start,
 			}, parseError
 		}
 		if r == '\\' {
@@ -301,7 +315,7 @@ func (s *Scanner) startsWithIdentSequence() bool {
 	return startsWithIdentSequence(next)
 }
 
-func (s *Scanner) string(end rune) (Token, error) {
+func (s *Scanner) string(start Location, end rune) (Token, error) {
 	tb := new(tokenBuilder)
 	for {
 		r, _, err := s.r.ReadRune()
@@ -311,6 +325,7 @@ func (s *Scanner) string(end rune) (Token, error) {
 			return Token{
 				Kind:  StringKind,
 				Value: value,
+				Start: start,
 			}, err
 		}
 		switch r {
@@ -322,6 +337,7 @@ func (s *Scanner) string(end rune) (Token, error) {
 			return Token{
 				Kind:  StringKind,
 				Value: value,
+				Start: start,
 			}, err
 		case '\n':
 			s.r.UnreadRune()
@@ -330,6 +346,7 @@ func (s *Scanner) string(end rune) (Token, error) {
 			return Token{
 				Kind:  BadStringKind,
 				Value: value,
+				Start: start,
 			}, err
 		case '\\':
 			s.r.UnreadRune()
@@ -346,6 +363,7 @@ func (s *Scanner) string(end rune) (Token, error) {
 				return Token{
 					Kind:  StringKind,
 					Value: value,
+					Start: start,
 				}, err
 			}
 			tb.WriteRune(r)
@@ -356,12 +374,14 @@ func (s *Scanner) string(end rune) (Token, error) {
 }
 
 func (s *Scanner) numeric() (Token, error) {
+	start := s.r.location()
 	tb := new(tokenBuilder)
 	if err := s.consumeNumber(tb); err != nil {
 		value, _ := tb.String()
 		return Token{
 			Kind:  NumberKind,
 			Value: value,
+			Start: start,
 		}, err
 	}
 	if s.startsWithIdentSequence() {
@@ -375,6 +395,7 @@ func (s *Scanner) numeric() (Token, error) {
 			Kind:  DimensionKind,
 			Value: value[:n],
 			Unit:  value[n:],
+			Start: start,
 		}, err
 	}
 	if next, _ := s.r.peek(1); len(next) >= 1 && next[0] == '%' {
@@ -386,6 +407,7 @@ func (s *Scanner) numeric() (Token, error) {
 		return Token{
 			Kind:  PercentageKind,
 			Value: value,
+			Start: start,
 		}, err
 	}
 
@@ -396,6 +418,7 @@ func (s *Scanner) numeric() (Token, error) {
 	return Token{
 		Kind:  NumberKind,
 		Value: value,
+		Start: start,
 	}, err
 }
 
@@ -597,16 +620,24 @@ func (s *Scanner) consumeLiteral(lit string) bool {
 const scannerLookAhead = 4
 
 type bufferedReader struct {
-	r     io.RuneReader
-	rpos  int8
-	wpos  int8
-	buf   [scannerLookAhead]rune
-	sizes [scannerLookAhead]int
-	err   error
+	r       io.RuneReader
+	rpos    int8
+	wpos    int8
+	buf     [scannerLookAhead]rune
+	sizes   [scannerLookAhead]int
+	baseLoc Location
+	err     error
 }
 
 func newBufferedReader(r io.RuneReader) *bufferedReader {
-	return &bufferedReader{r: r}
+	return &bufferedReader{
+		r:       r,
+		baseLoc: Location{Line: 1},
+	}
+}
+
+func (br *bufferedReader) location() Location {
+	return addLocation(br.baseLoc, br.buf[:br.rpos], br.sizes[:br.rpos])
 }
 
 // ReadRune reads the next [filtered code point] in the input stream.
@@ -684,6 +715,7 @@ func (br *bufferedReader) peek(n int8) ([]rune, error) {
 
 	// Pop excess runes from the front.
 	popCount := max(br.wpos+nread-scannerLookAhead, 0)
+	br.baseLoc = addLocation(br.baseLoc, br.buf[:popCount], br.sizes[:popCount])
 	copy(br.buf[:], br.buf[popCount:])
 	copy(br.sizes[:], br.sizes[popCount:])
 	br.rpos -= popCount
@@ -804,4 +836,16 @@ func isNonPrintable(r rune) bool {
 		r == '\t' ||
 		0x0e <= r && r <= 0x1f ||
 		r == 0x7f
+}
+
+func addLocation(loc Location, runes []rune, sizes []int) Location {
+	for _, r := range runes {
+		if r == '\n' {
+			loc.Line++
+		}
+	}
+	for _, size := range sizes {
+		loc.Offset += int64(size)
+	}
+	return loc
 }
