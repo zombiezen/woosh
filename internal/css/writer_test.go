@@ -11,6 +11,87 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
+func TestWriter(t *testing.T) {
+	tests := []struct {
+		name   string
+		tokens []Token
+		want   string
+	}{
+		{
+			name:   "Empty",
+			tokens: []Token{},
+			want:   "",
+		},
+		{
+			name: "AfterFirstBrace",
+			tokens: []Token{
+				{Kind: IdentKind, Value: "p"},
+				{Kind: WhitespaceKind},
+				{Kind: DelimKind, Value: ">"},
+				{Kind: WhitespaceKind},
+				{Kind: IdentKind, Value: "a"},
+				{Kind: WhitespaceKind},
+				{Kind: LBraceKind},
+			},
+			want: "p > a {",
+		},
+		{
+			name: "WhitespaceAfterFirstBrace",
+			tokens: []Token{
+				{Kind: IdentKind, Value: "p"},
+				{Kind: WhitespaceKind},
+				{Kind: DelimKind, Value: ">"},
+				{Kind: WhitespaceKind},
+				{Kind: IdentKind, Value: "a"},
+				{Kind: WhitespaceKind},
+				{Kind: LBraceKind},
+				{Kind: WhitespaceKind},
+			},
+			want: "p > a {\n",
+		},
+		{
+			name: "FullRule",
+			tokens: []Token{
+				{Kind: IdentKind, Value: "p"},
+				{Kind: WhitespaceKind},
+				{Kind: DelimKind, Value: ">"},
+				{Kind: WhitespaceKind},
+				{Kind: IdentKind, Value: "a"},
+				{Kind: WhitespaceKind},
+				{Kind: LBraceKind},
+				{Kind: WhitespaceKind},
+				{Kind: IdentKind, Value: "color"},
+				{Kind: ColonKind},
+				{Kind: WhitespaceKind},
+				{Kind: IdentKind, Value: "blue"},
+				{Kind: SemicolonKind},
+				{Kind: WhitespaceKind},
+				{Kind: RBraceKind},
+				{Kind: WhitespaceKind},
+			},
+			want: "" +
+				"p > a {\n" +
+				"\tcolor: blue;\n" +
+				"}\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sb := new(strings.Builder)
+			w := NewWriter(sb)
+			for _, tok := range test.tokens {
+				if err := w.WriteToken(tok); err != nil {
+					t.Error(err)
+				}
+			}
+			if diff := cmp.Diff(test.want, sb.String()); diff != "" {
+				t.Errorf("output (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // FuzzWriter verifies that tokens can be round-tripped through the scanner.
 func FuzzWriter(f *testing.F) {
 	for _, test := range scannerTests {

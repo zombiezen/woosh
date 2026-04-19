@@ -12,7 +12,9 @@ type Writer struct {
 	w         stringWriter
 	prevKind  Kind
 	prevValue string
-	newline   []byte
+
+	indent      []byte
+	needsIndent bool
 }
 
 // NewWriter returns a new [*Writer] that writes to w.
@@ -22,8 +24,8 @@ func NewWriter(w io.Writer) *Writer {
 		sw = fallbackStringWriter{w}
 	}
 	return &Writer{
-		w:       sw,
-		newline: append(make([]byte, 0, 8), '\n'),
+		w:      sw,
+		indent: make([]byte, 0, 8),
 	}
 }
 
@@ -33,12 +35,10 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 		switch w.prevKind {
 		case WhitespaceKind:
 			return nil
-		case SemicolonKind:
+		case SemicolonKind, RBraceKind:
 			// No indentation change.
 		case LBraceKind:
-			w.newline = append(w.newline, '\t')
-		case RBraceKind:
-			w.newline = w.newline[:max(len(w.newline)-1, 1)]
+			w.indent = append(w.indent, '\t')
 		default:
 			w.prevKind = WhitespaceKind
 			w.prevValue = ""
@@ -47,10 +47,22 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 		}
 		w.prevKind = WhitespaceKind
 		w.prevValue = ""
-		_, err := w.w.Write(w.newline)
+		w.needsIndent = true
+		_, err := w.w.WriteString("\n")
 		return err
 	}
 
+	if tok.Kind == RBraceKind {
+		w.indent = w.indent[:max(len(w.indent)-1, 0)]
+	}
+	if w.needsIndent {
+		w.needsIndent = false
+		if len(w.indent) > 0 {
+			if _, err := w.w.Write(w.indent); err != nil {
+				return err
+			}
+		}
+	}
 	if requiresCommentSeparator(Token{Kind: w.prevKind, Value: w.prevValue}, tok) {
 		if _, err := w.w.WriteString("/**/"); err != nil {
 			return err
