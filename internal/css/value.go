@@ -102,7 +102,7 @@ func (v *Value) UnmarshalText(text []byte) error {
 		return err
 	}
 	p.whitespace()
-	if tok, err := p.next(); tok.Kind != EOFKind {
+	if tok, err := p.stream.Next(); tok.Kind != EOFKind {
 		return fmt.Errorf("parse css value: unexpected %v", tok)
 	} else if !errors.Is(err, io.EOF) {
 		return fmt.Errorf("parse css value: %w", err)

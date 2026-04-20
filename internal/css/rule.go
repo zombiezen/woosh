@@ -102,7 +102,7 @@ func (rule *Rule) UnmarshalText(text []byte) error {
 	}
 	*rule = *rule0
 	p.whitespace()
-	if tok, err := p.next(); tok.Kind != EOFKind {
+	if tok, err := p.stream.Next(); tok.Kind != EOFKind {
 		return fmt.Errorf("parse css rule: unexpected %v", tok)
 	} else if !errors.Is(err, io.EOF) {
 		return fmt.Errorf("parse css rule: %w", err)

@@ -10,50 +10,21 @@ import (
 //
 // [CSS parsing stage]: https://www.w3.org/TR/css-syntax-3/#parsing
 type Parser struct {
-	nextFunc  func() (Token, error)
-	buffer    Token
-	err       error
-	hasBuffer bool
-	topLevel  bool
+	stream   tokenStream
+	topLevel bool
 }
 
 // NewParser returns a new [*Parser] that reads tokens from the given [*Scanner].
 func NewParser(s *Scanner) *Parser {
-	return &Parser{nextFunc: s.Next, topLevel: true}
+	return &Parser{
+		stream:   &bufferedScanner{Scanner: s},
+		topLevel: true,
+	}
 }
 
 // ParseTokens returns a new [*Parser] that reads tokens from the given slice.
 func ParseTokens(tokens []Token) *Parser {
-	i := 0
-	return &Parser{nextFunc: func() (Token, error) {
-		if i >= len(tokens) {
-			return Token{}, io.EOF
-		}
-		tok := tokens[i]
-		if tok.Kind == EOFKind {
-			return tok, io.EOF
-		}
-		i++
-		return tok, nil
-	}}
-}
-
-func (p *Parser) next() (Token, error) {
-	if p.hasBuffer {
-		p.hasBuffer = false
-		return p.buffer, p.err
-	}
-	tok, err := p.nextFunc()
-	if tok.Kind != EOFKind {
-		p.buffer, p.err = tok, err
-	}
-	return tok, err
-}
-
-func (p *Parser) prev() {
-	if p.buffer.Kind != EOFKind {
-		p.hasBuffer = true
-	}
+	return &Parser{stream: &tokenSlice{tokens: tokens}}
 }
 
 // NextRule parses the next rule from the underlying token source.
@@ -66,7 +37,7 @@ func (p *Parser) prev() {
 func (p *Parser) NextRule() (*Rule, error) {
 	var parseError error
 	for {
-		tok, err := p.next()
+		tok, err := p.stream.Next()
 		if err != nil {
 			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
 		}
@@ -77,7 +48,7 @@ func (p *Parser) NextRule() (*Rule, error) {
 			// Ignore.
 		case CDOKind, CDCKind:
 			if !p.topLevel {
-				p.prev()
+				p.stream.Previous()
 				r, err := p.qualifiedRule()
 				parseError = errors.Join(parseError, err)
 				if r != nil {
@@ -91,7 +62,7 @@ func (p *Parser) NextRule() (*Rule, error) {
 				return r, parseError
 			}
 		default:
-			p.prev()
+			p.stream.Previous()
 			r, err := p.qualifiedRule()
 			parseError = errors.Join(parseError, err)
 			if r != nil {
@@ -109,7 +80,7 @@ func (p *Parser) atRule(name string, loc Location) (*Rule, error) {
 
 	var parseError error
 	for {
-		tok, err := p.next()
+		tok, err := p.stream.Next()
 		if err != nil {
 			parseError = errors.Join(parseError, fmt.Errorf("parse css @%s rule: %w", name, err))
 		}
@@ -117,7 +88,7 @@ func (p *Parser) atRule(name string, loc Location) (*Rule, error) {
 		case EOFKind, SemicolonKind:
 			return r, parseError
 		case LBraceKind:
-			p.prev()
+			p.stream.Previous()
 			var err error
 			r.Block, err = p.block(nil)
 			if err != nil {
@@ -126,7 +97,7 @@ func (p *Parser) atRule(name string, loc Location) (*Rule, error) {
 			}
 			return r, parseError
 		default:
-			p.prev()
+			p.stream.Previous()
 			var err error
 			r.Prelude, err = p.value(r.Prelude)
 			if err != nil {
@@ -142,7 +113,7 @@ func (p *Parser) qualifiedRule() (*Rule, error) {
 
 	var parseError error
 	for {
-		tok, err := p.next()
+		tok, err := p.stream.Next()
 		if err != nil {
 			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
 		}
@@ -150,7 +121,7 @@ func (p *Parser) qualifiedRule() (*Rule, error) {
 		case EOFKind:
 			return nil, parseError
 		case LBraceKind:
-			p.prev()
+			p.stream.Previous()
 			var err error
 			r.Block, err = p.block(nil)
 			if err != nil {
@@ -159,7 +130,7 @@ func (p *Parser) qualifiedRule() (*Rule, error) {
 			}
 			return r, parseError
 		default:
-			p.prev()
+			p.stream.Previous()
 			var err error
 			r.Prelude, err = p.value(r.Prelude)
 			if err != nil {
@@ -171,16 +142,16 @@ func (p *Parser) qualifiedRule() (*Rule, error) {
 }
 
 func (p *Parser) value(dst []Token) ([]Token, error) {
-	tok, err := p.next()
+	tok, err := p.stream.Next()
 	if tok.Kind == EOFKind {
 		return dst, err
 	}
 	switch tok.Kind {
 	case LBraceKind, LBracketKind, LParenKind:
-		p.prev()
+		p.stream.Previous()
 		return p.block(dst)
 	case FunctionKind:
-		p.prev()
+		p.stream.Previous()
 		return p.function(dst)
 	default:
 		dst = append(dst, tok)
@@ -192,13 +163,13 @@ func (p *Parser) value(dst []Token) ([]Token, error) {
 }
 
 func (p *Parser) block(dst []Token) ([]Token, error) {
-	tok, err := p.next()
+	tok, err := p.stream.Next()
 	if tok.Kind == EOFKind {
 		return dst, err
 	}
 	name, end, isBlock := blockKind(tok.Kind)
 	if !isBlock || tok.Kind == FunctionKind {
-		p.prev()
+		p.stream.Previous()
 		return dst, fmt.Errorf("parse css block: expected (/[/{ (found %v)", tok)
 	}
 	if err != nil {
@@ -208,7 +179,7 @@ func (p *Parser) block(dst []Token) ([]Token, error) {
 	dst = append(dst, tok)
 
 	for {
-		tok, err := p.next()
+		tok, err := p.stream.Next()
 		switch tok.Kind {
 		case EOFKind:
 			if err == io.EOF {
@@ -223,7 +194,7 @@ func (p *Parser) block(dst []Token) ([]Token, error) {
 			}
 			return dst, parseError
 		default:
-			p.prev()
+			p.stream.Previous()
 			var err error
 			dst, err = p.value(dst)
 			if err != nil {
@@ -235,12 +206,12 @@ func (p *Parser) block(dst []Token) ([]Token, error) {
 }
 
 func (p *Parser) function(dst []Token) ([]Token, error) {
-	tok, err := p.next()
+	tok, err := p.stream.Next()
 	if tok.Kind == EOFKind {
 		return dst, err
 	}
 	if tok.Kind != FunctionKind {
-		p.prev()
+		p.stream.Previous()
 		return dst, fmt.Errorf("parse css function call: expected %v (found %v)", FunctionKind, tok)
 	}
 	name := tok.Value
@@ -251,7 +222,7 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 	dst = append(dst, tok)
 
 	for {
-		tok, err := p.next()
+		tok, err := p.stream.Next()
 		switch tok.Kind {
 		case EOFKind:
 			if err == io.EOF {
@@ -266,7 +237,7 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 			}
 			return dst, parseError
 		default:
-			p.prev()
+			p.stream.Previous()
 			var err error
 			dst, err = p.value(dst)
 			if err != nil {
@@ -279,13 +250,64 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 
 func (p *Parser) whitespace() {
 	for {
-		tok, err := p.next()
+		tok, err := p.stream.Next()
 		if err != nil {
 			return
 		}
 		if tok.Kind != WhitespaceKind {
-			p.prev()
+			p.stream.Previous()
 			return
 		}
 	}
+}
+
+type tokenStream interface {
+	Next() (Token, error)
+	Previous()
+}
+
+type bufferedScanner struct {
+	*Scanner
+	buffer    Token
+	err       error
+	hasBuffer bool
+}
+
+func (s *bufferedScanner) Next() (Token, error) {
+	if s.hasBuffer {
+		s.hasBuffer = false
+		return s.buffer, s.err
+	}
+	tok, err := s.Scanner.Next()
+	if tok.Kind != EOFKind {
+		s.buffer, s.err = tok, err
+	}
+	return tok, err
+}
+
+func (s *bufferedScanner) Previous() {
+	if s.buffer.Kind != EOFKind {
+		s.hasBuffer = true
+	}
+}
+
+type tokenSlice struct {
+	tokens []Token
+	pos    int
+}
+
+func (slice *tokenSlice) Next() (Token, error) {
+	if slice.pos >= len(slice.tokens) {
+		return Token{}, io.EOF
+	}
+	tok := slice.tokens[slice.pos]
+	if tok.Kind == EOFKind {
+		return tok, io.EOF
+	}
+	slice.pos++
+	return tok, nil
+}
+
+func (slice *tokenSlice) Previous() {
+	slice.pos--
 }
