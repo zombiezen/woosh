@@ -77,7 +77,7 @@ func (rule *Rule) AppendText(dst []byte) ([]byte, error) {
 		if rule.Block[0].Kind != LBraceKind {
 			return dst, fmt.Errorf("marshal css rule: {}-block starts with %v instead of {", rule.Block[0])
 		}
-		if _, ok := rule.Block.BlockBody(); !ok {
+		if _, ok := rule.Block.BlockContents(); !ok {
 			return dst, fmt.Errorf("marshal css rule: {}-block is not valid")
 		}
 	}

@@ -40,18 +40,18 @@ func (v Value) IsValid() bool {
 	case EOFKind, WhitespaceKind, RParenKind, RBracketKind, RBraceKind:
 		return false
 	case LParenKind, LBracketKind, LBraceKind:
-		_, ok := v.BlockBody()
+		_, ok := v.BlockContents()
 		return ok
 	default:
 		return len(v) == 1 && isKnownKind(v[0].Kind)
 	}
 }
 
-// BlockBody returns a slice of the tokens inside of a block value.
+// BlockContents returns a slice of the tokens inside of a block value.
 // ok is true if and only if v represents a block,
 // all block-introducing tokens are matched,
 // and v does not contain any trailing tokens.
-func (v Value) BlockBody() (body []Token, ok bool) {
+func (v Value) BlockContents() (contents []Token, ok bool) {
 	if len(v) < 2 {
 		return nil, false
 	}
