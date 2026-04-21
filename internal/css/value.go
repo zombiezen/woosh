@@ -20,6 +20,19 @@ var (
 // a {}-block, a ()-block, a []-block, a function-block, or a preserved token.
 type Value []Token
 
+// SplitValues returns an iterator over the component values in the slice of tokens.
+func SplitValues(tokens []Token) iter.Seq[Value] {
+	return func(yield func(Value) bool) {
+		for tokens := tokens; len(tokens) > 0; {
+			var v Value
+			v, tokens, _ = cutValue(tokens)
+			if !yield(v) {
+				return
+			}
+		}
+	}
+}
+
 // Kind returns the [Kind] of the first [Token] in v.
 // If len(v) == 0, then Kind returns [EOFKind].
 func (v Value) Kind() Kind {
@@ -52,26 +65,11 @@ func (v Value) IsValid() bool {
 // all block-introducing tokens are matched,
 // and v does not contain any trailing tokens.
 func (v Value) BlockContents() (contents []Token, ok bool) {
-	if len(v) < 2 {
+	block, tail, ok := cutValue(v)
+	if !ok || len(block) < 2 || len(tail) > 0 {
 		return nil, false
 	}
-	_, end, ok := blockKind(v[0].Kind)
-	if !ok {
-		return nil, false
-	}
-	stack := []Kind{end}
-	i := 1
-	for ; len(stack) > 0 && i < len(v); i++ {
-		if v[i].Kind == stack[len(stack)-1] {
-			stack = stack[:len(stack)-1]
-		} else if _, end, ok := blockKind(v[0].Kind); ok {
-			stack = append(stack, end)
-		}
-	}
-	if len(stack) > 0 || i < len(v) {
-		return nil, false
-	}
-	return v[1 : len(v)-1], true
+	return block[1 : len(block)-1], true
 }
 
 // MarshalText implements [encoding.TextMarshaler] by serializing the tokens.
@@ -108,4 +106,32 @@ func (v *Value) UnmarshalText(text []byte) error {
 		return fmt.Errorf("parse css value: %w", err)
 	}
 	return nil
+}
+
+// cutValue finds the end of the component value
+// that starts at the beginning of the slice of tokens.
+// ok is true if and only if tokens starts with a preserved token
+// or a properly closed block.
+// If tokens starts with an unclosed block,
+// then cutValue returns (tokens, tokens[len(tokens):], false).
+func cutValue(tokens []Token) (head Value, tail []Token, ok bool) {
+	if len(tokens) == 0 {
+		return nil, nil, false
+	}
+	_, end, ok := blockKind(tokens[0].Kind)
+	if !ok {
+		return tokens[:1], tokens[1:], true
+	}
+	stack := []Kind{end}
+	i := 1
+	for ; len(stack) > 0 && i < len(tokens); i++ {
+		// CSS parsing only considers the top of the stack.
+		// https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
+		if tokens[i].Kind == stack[len(stack)-1] {
+			stack = stack[:len(stack)-1]
+		} else if _, end, ok := blockKind(tokens[0].Kind); ok {
+			stack = append(stack, end)
+		}
+	}
+	return tokens[:i], tokens[i:], len(stack) == 0
 }

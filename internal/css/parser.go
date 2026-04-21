@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // A Parser groups chunks of tokens according to the [CSS parsing stage].
@@ -56,7 +57,7 @@ func (p *Parser) NextRule() (*Rule, error) {
 				p.stream.DiscardMark()
 			} else {
 				p.stream.RestoreMark()
-				r, err := p.qualifiedRule()
+				r, err := p.qualifiedRule(EOFKind, false)
 				parseError = errors.Join(parseError, err)
 				if r != nil {
 					return r, parseError
@@ -64,14 +65,14 @@ func (p *Parser) NextRule() (*Rule, error) {
 			}
 		case AtKeywordKind:
 			p.stream.DiscardMark()
-			r, err := p.atRule(tok.Value, tok.Start)
+			r, err := p.atRule(tok.Value, tok.Start, false)
 			parseError = errors.Join(parseError, err)
 			if r != nil {
 				return r, parseError
 			}
 		default:
 			p.stream.RestoreMark()
-			r, err := p.qualifiedRule()
+			r, err := p.qualifiedRule(EOFKind, false)
 			parseError = errors.Join(parseError, err)
 			if r != nil {
 				return r, parseError
@@ -80,7 +81,7 @@ func (p *Parser) NextRule() (*Rule, error) {
 	}
 }
 
-func (p *Parser) atRule(name string, loc Location) (*Rule, error) {
+func (p *Parser) atRule(name string, loc Location, nested bool) (*Rule, error) {
 	r := &Rule{
 		AtRule:     name,
 		AtLocation: loc,
@@ -106,6 +107,14 @@ func (p *Parser) atRule(name string, loc Location) (*Rule, error) {
 				parseError = errors.Join(parseError, fmt.Errorf("parse css @%s rule: %w", name, err))
 			}
 			return r, parseError
+		case RBraceKind:
+			if nested {
+				p.stream.RestoreMark()
+				return r, parseError
+			} else {
+				p.stream.DiscardMark()
+				r.Prelude = append(r.Prelude, tok)
+			}
 		default:
 			p.stream.RestoreMark()
 			var err error
@@ -118,7 +127,7 @@ func (p *Parser) atRule(name string, loc Location) (*Rule, error) {
 	}
 }
 
-func (p *Parser) qualifiedRule() (*Rule, error) {
+func (p *Parser) qualifiedRule(stop Kind, nested bool) (*Rule, error) {
 	r := new(Rule)
 
 	var parseError error
@@ -129,8 +138,8 @@ func (p *Parser) qualifiedRule() (*Rule, error) {
 			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
 		}
 		switch tok.Kind {
-		case EOFKind:
-			p.stream.DiscardMark()
+		case EOFKind, stop:
+			p.stream.RestoreMark()
 			return nil, parseError
 		case LBraceKind:
 			p.stream.RestoreMark()
@@ -141,6 +150,15 @@ func (p *Parser) qualifiedRule() (*Rule, error) {
 				parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
 			}
 			return r, parseError
+		case RBraceKind:
+			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: unexpected }"))
+			if nested {
+				p.stream.DiscardMark()
+				return nil, parseError
+			} else {
+				p.stream.DiscardMark()
+				r.Prelude = append(r.Prelude, tok)
+			}
 		default:
 			p.stream.RestoreMark()
 			var err error
@@ -173,6 +191,35 @@ func (p *Parser) value(dst []Token) ([]Token, error) {
 			err = fmt.Errorf("parse css value: %w", err)
 		}
 		return dst, err
+	}
+}
+
+func (p *Parser) valueList(stop Kind, nested bool) (dst []Token, err error) {
+	var parseError error
+	for {
+		p.stream.Mark()
+		tok, err := p.stream.Next()
+		switch tok.Kind {
+		case EOFKind, stop:
+			p.stream.RestoreMark()
+			return dst, parseError
+		case RBraceKind:
+			if nested {
+				p.stream.RestoreMark()
+				return dst, parseError
+			} else {
+				p.stream.DiscardMark()
+				if err != nil {
+					parseError = errors.Join(parseError, fmt.Errorf("parse css value: %w", err))
+				}
+				parseError = errors.Join(parseError, fmt.Errorf("parse css value: unmatched }"))
+			}
+		default:
+			p.stream.RestoreMark()
+			// Ignore err from Next call above, since p.value() will pick it up.
+			dst, err = p.value(dst)
+			parseError = errors.Join(parseError, err)
+		}
 	}
 }
 
@@ -271,6 +318,202 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 			if err != nil {
 				// TODO(soon): Split apart err and wrap each error individually.
 				parseError = errors.Join(parseError, fmt.Errorf("parse css %s call: %w", name, err))
+			}
+		}
+	}
+}
+
+// blockPart parses the next rule or declaration.
+// If there are no more rules, then blockPart returns (BlockPart{}, nil).
+// This requires arbitrary lookahead,
+// so this should only be run on a [*tokenSlice].
+func (p *Parser) blockPart() (BlockPart, error) {
+	var parseError error
+	for {
+		p.stream.Mark()
+		tok, err := p.stream.Next()
+		switch tok.Kind {
+		case EOFKind:
+			p.stream.DiscardMark()
+			if err != io.EOF {
+				parseError = errors.Join(parseError, err)
+			}
+			return BlockPart{}, parseError
+		case RBraceKind:
+			p.stream.RestoreMark()
+			return BlockPart{}, parseError
+		case WhitespaceKind, SemicolonKind:
+			p.stream.DiscardMark()
+		case AtKeywordKind:
+			p.stream.DiscardMark()
+			rule, err := p.atRule(tok.Value, tok.Start, true)
+			parseError = errors.Join(parseError, err)
+			return ToBlockPart(rule), parseError
+		case IdentKind:
+			// This could either be a declaration or a qualified rule.
+			// We need arbitrary lookahead to find
+			p.whitespace()
+			isCustomProperty := len(tok.Value) > len("--") && strings.HasPrefix(tok.Value, "--")
+			if tok, _ := p.stream.Next(); tok.Kind != ColonKind {
+				// Example: "font+"... is guaranteed to not be a property.
+				p.stream.RestoreMark()
+				if rule, err := p.qualifiedRule(SemicolonKind, true); rule != nil {
+					parseError = errors.Join(parseError, err)
+					return ToBlockPart(rule), parseError
+				}
+				continue
+			}
+			if isCustomProperty {
+				// Custom properties won't produce a valid rule,
+				// so consume as a declaration.
+				// Example: "--foo:hover {"..."}" is guaranteed to be a custom property.
+				p.stream.RestoreMark()
+				if decl, err := p.declaration(true); decl != nil {
+					parseError = errors.Join(parseError, err)
+					return ToBlockPart(decl), parseError
+				}
+				continue
+			}
+
+			// Plausible that it's a declaration.
+			// Try it as such, and if it doesn't parse as one,
+			// retry as a qualified rule.
+			p.stream.RestoreMark()
+			p.stream.Mark()
+			if decl, err := p.declaration(true); decl != nil {
+				p.stream.DiscardMark()
+				parseError = errors.Join(parseError, err)
+				return ToBlockPart(decl), parseError
+			}
+			fallthrough
+		default:
+			p.stream.RestoreMark()
+			rule, err := p.qualifiedRule(SemicolonKind, true)
+			parseError = errors.Join(parseError, err)
+			if rule != nil {
+				return ToBlockPart(rule), parseError
+			}
+		}
+	}
+}
+
+// declaration parses a single declaration (e.g. "foo:bar").
+// If the declaration isn't valid,
+// then declaration consumes as much of the declaration then returns nil.
+func (p *Parser) declaration(nested bool) (*Declaration, error) {
+	// Parse identifier.
+	p.stream.Mark()
+	tok, err := p.stream.Next()
+	if tok.Kind != IdentKind {
+		p.stream.RestoreMark()
+		return nil, p.skipBadDeclaration(nested)
+	}
+	if err != nil {
+		err = fmt.Errorf("parse css declaration: %w", err)
+	}
+	parseError := err
+
+	decl := &Declaration{
+		Name:      tok.Value,
+		NameStart: tok.Start,
+	}
+
+	// Parse colon.
+	p.whitespace()
+	p.stream.Mark()
+	tok, err = p.stream.Next()
+	if err != nil {
+		parseError = errors.Join(parseError, fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
+	}
+	if tok.Kind != ColonKind {
+		p.stream.RestoreMark()
+		if err := p.skipBadDeclaration(nested); err != nil {
+			parseError = errors.Join(parseError, fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
+		}
+		return nil, parseError
+	}
+	p.stream.DiscardMark()
+	p.whitespace()
+
+	// Parse value.
+	decl.Value, err = p.valueList(SemicolonKind, nested)
+	if err != nil {
+		parseError = errors.Join(parseError, fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
+	}
+
+	// Check for important flag.
+	finalWhitespaceStart := len(decl.Value)
+	for finalWhitespaceStart > 0 && decl.Value[finalWhitespaceStart-1].Kind == WhitespaceKind {
+		finalWhitespaceStart--
+	}
+	importantStart := finalWhitespaceStart - 2
+	decl.Important = importantStart >= 0 &&
+		decl.Value[importantStart].Kind == DelimKind &&
+		decl.Value[importantStart].Value == "!" &&
+		decl.Value[importantStart+1].Kind == IdentKind &&
+		isASCIICaseInsensitiveMatch(decl.Value[importantStart+1].Value, "important")
+	if decl.Important {
+		decl.Value = slices.Delete(decl.Value, importantStart, finalWhitespaceStart)
+	}
+
+	// Remove trailing whitespace.
+	for len(decl.Value) > 0 && decl.Value[len(decl.Value)-1].Kind == WhitespaceKind {
+		decl.Value = decl.Value[:len(decl.Value)-1]
+	}
+
+	// Standard properties can only have a singular {}-block.
+	if !decl.IsCustomProperty() {
+		hasBraceBlock := false
+		hasNonWhitespace := false
+		for v := range SplitValues(decl.Value) {
+			switch v.Kind() {
+			case WhitespaceKind:
+				// Ignore.
+			case LBraceKind:
+				if hasNonWhitespace {
+					return nil, parseError
+				}
+				hasNonWhitespace = true
+				hasBraceBlock = true
+			default:
+				hasNonWhitespace = true
+				if hasBraceBlock {
+					return nil, parseError
+				}
+			}
+		}
+	}
+
+	return decl, parseError
+}
+
+func (p *Parser) skipBadDeclaration(nested bool) error {
+	var parseError error
+	for {
+		p.stream.Mark()
+		tok, err := p.stream.Next()
+		switch tok.Kind {
+		case EOFKind:
+			p.stream.DiscardMark()
+			if err != io.EOF {
+				parseError = errors.Join(parseError, err)
+			}
+			return parseError
+		case SemicolonKind:
+			p.stream.DiscardMark()
+			parseError = errors.Join(parseError, err)
+			return parseError
+		case RBraceKind:
+			if nested {
+				p.stream.RestoreMark()
+				return nil
+			} else {
+				p.stream.DiscardMark()
+			}
+		default:
+			p.stream.RestoreMark()
+			if _, err := p.value(nil); err != nil {
+				parseError = errors.Join(parseError, err)
 			}
 		}
 	}

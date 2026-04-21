@@ -3,6 +3,7 @@ package css
 import (
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -138,4 +139,236 @@ func TestParserRuleList(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSplitBlockContents(t *testing.T) {
+	tests := []struct {
+		name string
+		css  string
+		want []BlockPart
+	}{
+		{
+			name: "Empty",
+			css:  "",
+			want: []BlockPart{},
+		},
+		{
+			name: "SingleProperty",
+			css:  "background-color: blue;",
+			want: []BlockPart{
+				ToBlockPart(&Declaration{
+					Name:      "background-color",
+					NameStart: Location{Offset: 0, Line: 1},
+					Value: Value{
+						{
+							Kind:  IdentKind,
+							Value: "blue",
+							Start: Location{Offset: 18, Line: 1},
+						},
+					},
+				}),
+			},
+		},
+		{
+			name: "MultipleProperties",
+			css:  "color: white; background-color: blue; font-family: monospace;",
+			want: []BlockPart{
+				ToBlockPart(&Declaration{
+					Name:      "color",
+					NameStart: Location{Offset: 0, Line: 1},
+					Value: Value{
+						{
+							Kind:  IdentKind,
+							Value: "white",
+							Start: Location{Offset: 7, Line: 1},
+						},
+					},
+				}),
+				ToBlockPart(&Declaration{
+					Name:      "background-color",
+					NameStart: Location{Offset: 14, Line: 1},
+					Value: Value{
+						{
+							Kind:  IdentKind,
+							Value: "blue",
+							Start: Location{Offset: 32, Line: 1},
+						},
+					},
+				}),
+				ToBlockPart(&Declaration{
+					Name:      "font-family",
+					NameStart: Location{Offset: 38, Line: 1},
+					Value: Value{
+						{
+							Kind:  IdentKind,
+							Value: "monospace",
+							Start: Location{Offset: 51, Line: 1},
+						},
+					},
+				}),
+			},
+		},
+		{
+			name: "NestedRule",
+			css:  "font {}",
+			want: []BlockPart{
+				ToBlockPart(&Rule{
+					Prelude: []Token{
+						{
+							Kind:  IdentKind,
+							Value: "font",
+							Start: Location{Offset: 0, Line: 1},
+						},
+						{
+							Kind:  WhitespaceKind,
+							Start: Location{Offset: 4, Line: 1},
+						},
+					},
+					Block: Value{
+						{
+							Kind:  LBraceKind,
+							Start: Location{Offset: 5, Line: 1},
+						},
+						{
+							Kind:  RBraceKind,
+							Start: Location{Offset: 6, Line: 1},
+						},
+					},
+				}),
+			},
+		},
+		{
+			name: "NestedComplexSelectorRule",
+			css:  "font+foo {}",
+			want: []BlockPart{
+				ToBlockPart(&Rule{
+					Prelude: []Token{
+						{
+							Kind:  IdentKind,
+							Value: "font",
+							Start: Location{Offset: 0, Line: 1},
+						},
+						{
+							Kind:  DelimKind,
+							Value: "+",
+							Start: Location{Offset: 4, Line: 1},
+						},
+						{
+							Kind:  IdentKind,
+							Value: "foo",
+							Start: Location{Offset: 5, Line: 1},
+						},
+						{
+							Kind:  WhitespaceKind,
+							Start: Location{Offset: 8, Line: 1},
+						},
+					},
+					Block: Value{
+						{
+							Kind:  LBraceKind,
+							Start: Location{Offset: 9, Line: 1},
+						},
+						{
+							Kind:  RBraceKind,
+							Start: Location{Offset: 10, Line: 1},
+						},
+					},
+				}),
+			},
+		},
+		{
+			name: "NestedRulePseudoClass",
+			css:  "font:foo {}",
+			want: []BlockPart{
+				ToBlockPart(&Rule{
+					Prelude: []Token{
+						{
+							Kind:  IdentKind,
+							Value: "font",
+							Start: Location{Offset: 0, Line: 1},
+						},
+						{
+							Kind:  ColonKind,
+							Start: Location{Offset: 4, Line: 1},
+						},
+						{
+							Kind:  IdentKind,
+							Value: "foo",
+							Start: Location{Offset: 5, Line: 1},
+						},
+						{
+							Kind:  WhitespaceKind,
+							Start: Location{Offset: 8, Line: 1},
+						},
+					},
+					Block: Value{
+						{
+							Kind:  LBraceKind,
+							Start: Location{Offset: 9, Line: 1},
+						},
+						{
+							Kind:  RBraceKind,
+							Start: Location{Offset: 10, Line: 1},
+						},
+					},
+				}),
+			},
+		},
+		{
+			name: "CustomProperty",
+			css:  "--foo:hover {}",
+			want: []BlockPart{
+				ToBlockPart(&Declaration{
+					Name:      "--foo",
+					NameStart: Location{Offset: 0, Line: 1},
+					Value: Value{
+						{
+							Kind:  IdentKind,
+							Value: "hover",
+							Start: Location{Offset: 6, Line: 1},
+						},
+						{
+							Kind:  WhitespaceKind,
+							Start: Location{Offset: 11, Line: 1},
+						},
+						{
+							Kind:  LBraceKind,
+							Start: Location{Offset: 12, Line: 1},
+						},
+						{
+							Kind:  RBraceKind,
+							Start: Location{Offset: 13, Line: 1},
+						},
+					},
+				}),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var tokens []Token
+			for s := NewScanner(strings.NewReader(test.css)); ; {
+				tok, err := s.Next()
+				if err != nil && (err != io.EOF || tok.Kind != EOFKind) {
+					t.Error("Scan:", err)
+				}
+				if tok.Kind == EOFKind {
+					break
+				}
+				tokens = append(tokens, tok)
+			}
+
+			got := slices.Collect(SplitBlockContents(tokens))
+			if diff := cmp.Diff(test.want, got, blockPartOption(), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("parts (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func blockPartOption() cmp.Option {
+	return cmp.Transformer("css.BlockPart", func(part BlockPart) any {
+		return part.x
+	})
 }

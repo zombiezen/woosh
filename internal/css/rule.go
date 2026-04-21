@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"strings"
 )
 
 var (
@@ -66,6 +67,20 @@ func (rule *Rule) Tokens() iter.Seq[Token] {
 	}
 }
 
+// BlockContents returns an iterator over the declarations and rules in this rule's block.
+func (rule *Rule) BlockContents() iter.Seq[BlockPart] {
+	if rule == nil {
+		return func(yield func(BlockPart) bool) {}
+	}
+	return func(yield func(BlockPart) bool) {
+		contents, ok := rule.Block.BlockContents()
+		if !ok {
+			return
+		}
+		SplitBlockContents(contents)(yield)
+	}
+}
+
 // MarshalText implements [encoding.TextMarshaler] by serializing the rule's tokens.
 func (rule *Rule) MarshalText() ([]byte, error) {
 	return rule.AppendText(nil)
@@ -108,4 +123,76 @@ func (rule *Rule) UnmarshalText(text []byte) error {
 		return fmt.Errorf("parse css rule: %w", err)
 	}
 	return nil
+}
+
+// A Declaration is a name/value pair with an optional !important flag.
+type Declaration struct {
+	Name      string
+	NameStart Location
+	Value     Value
+	Important bool
+}
+
+// IsCustomProperty reports whether the declaration is a [custom property].
+//
+// [custom property]: https://drafts.csswg.org/css-variables-2/#custom-property
+func (decl *Declaration) IsCustomProperty() bool {
+	return decl != nil && isCustomPropertyName(decl.Name)
+}
+
+func isCustomPropertyName(name string) bool {
+	const prefix = "--"
+	return len(name) > len(prefix) && strings.HasPrefix(name, prefix)
+}
+
+// A BlockPart is a [*Declaration] or a [*Rule].
+// The zero value is a nil pointer.
+type BlockPart struct {
+	x any
+}
+
+// SplitBlockContents returns an iterator over the declarations and rules
+// from a list of tokens.
+// The list of tokens should not include the enclosing braces.
+func SplitBlockContents(tokens []Token) iter.Seq[BlockPart] {
+	return func(yield func(BlockPart) bool) {
+		p := ParseTokens(tokens)
+		for {
+			part, _ := p.blockPart()
+			if part.IsZero() {
+				break
+			}
+			if !yield(part) {
+				return
+			}
+		}
+	}
+}
+
+// ToBlockPart converts a pointer to a [BlockPart].
+// If x is a nil pointer, then ToBlockPart returns a zero [BlockPart].
+func ToBlockPart[T *Declaration | *Rule](x T) BlockPart {
+	if x == nil {
+		return BlockPart{}
+	}
+	return BlockPart{x}
+}
+
+// IsZero reports whether part is the zero value.
+func (part BlockPart) IsZero() bool {
+	return part.x == nil
+}
+
+// Declaration converts the [BlockPart] back to a [*Declaration].
+// If the [BlockPart] is not a [*Declaration], then Declaration returns nil.
+func (part BlockPart) Declaration() *Declaration {
+	decl, _ := part.x.(*Declaration)
+	return decl
+}
+
+// Rule converts the [BlockPart] back to a [*Rule].
+// If the [BlockPart] is not a [*Rule], then Rule returns nil.
+func (part BlockPart) Rule() *Rule {
+	r, _ := part.x.(*Rule)
+	return r
 }
