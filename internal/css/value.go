@@ -33,6 +33,30 @@ func SplitValues(tokens []Token) iter.Seq[Value] {
 	}
 }
 
+// SplitCommaSeparatedValues returns an iterator over all subslices of tokens
+// separated by comma [DelimKind] tokens.
+func SplitCommaSeparatedValues(tokens []Token) iter.Seq[[]Token] {
+	return func(yield func([]Token) bool) {
+		i, j := 0, 0
+		for {
+			v, tail, _ := cutValue(tokens[j:])
+			if v.Kind() == CommaKind {
+				if !yield(tokens[i:j]) {
+					return
+				}
+				i = j + len(tail)
+			}
+			if len(tail) == 0 {
+				if !yield(tokens[i:j]) {
+					return
+				}
+				break
+			}
+			j += len(tail)
+		}
+	}
+}
+
 // Kind returns the [Kind] of the first [Token] in v.
 // If len(v) == 0, then Kind returns [EOFKind].
 func (v Value) Kind() Kind {

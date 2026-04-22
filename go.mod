@@ -6,7 +6,10 @@ toolchain go1.26.1
 
 tool golang.org/x/tools/cmd/stringer
 
-require github.com/google/go-cmp v0.7.0
+require (
+	github.com/alecthomas/kong v1.15.0
+	github.com/google/go-cmp v0.7.0
+)
 
 require (
 	golang.org/x/mod v0.35.0 // indirect
