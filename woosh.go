@@ -63,7 +63,7 @@ func Process(dst io.Writer, opts *Options) error {
 		}
 
 		for _, rule := range layer.rules {
-			if rule.AtRule == "theme" {
+			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
 				continue
 			}
 			if err := writeTokenSeq(w, rule.Tokens()); err != nil {
@@ -126,8 +126,8 @@ func (s *state) process(u *url.URL, l *layer) error {
 		if rule == nil {
 			break
 		}
-		switch rule.AtRule {
-		case "import":
+		switch {
+		case css.EqualCaseInsensitive(rule.AtRule, "import"):
 			imp, err := parseImport(rule)
 			if err != nil {
 				return fmt.Errorf("process %v: %v", u, err)
@@ -144,7 +144,7 @@ func (s *state) process(u *url.URL, l *layer) error {
 			if err := s.process(importURL, importLayer); err != nil {
 				return err
 			}
-		case "layer":
+		case css.EqualCaseInsensitive(rule.AtRule, "layer"):
 			if len(rule.Block) > 0 {
 				l := s.getOrCreateLayer(parseLayerName(rule.Prelude))
 				for part := range rule.BlockContents() {
@@ -210,12 +210,12 @@ func parseImport(rule *css.Rule) (*cssImport, error) {
 	for v := range css.SplitValues(prelude) {
 		switch v.Kind() {
 		case css.IdentKind:
-			if v[0].Value == "layer" {
+			if css.EqualCaseInsensitive(v[0].Value, "layer") {
 				imp.layerName = ""
 				imp.hasLayer = true
 			}
 		case css.FunctionKind:
-			if v[0].Value == "layer" {
+			if css.EqualCaseInsensitive(v[0].Value, "layer") {
 				imp.hasLayer = true
 				args, _ := v.BlockContents()
 				imp.layerName = parseLayerName(args)

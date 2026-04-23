@@ -451,7 +451,7 @@ func (p *Parser) declaration(nested bool) (*Declaration, error) {
 		decl.Value[importantStart].Kind == DelimKind &&
 		decl.Value[importantStart].Value == "!" &&
 		decl.Value[importantStart+1].Kind == IdentKind &&
-		isASCIICaseInsensitiveMatch(decl.Value[importantStart+1].Value, "important")
+		EqualCaseInsensitive(decl.Value[importantStart+1].Value, "important")
 	if decl.Important {
 		decl.Value = slices.Delete(decl.Value, importantStart, finalWhitespaceStart)
 	}

@@ -167,7 +167,7 @@ func (s *Scanner) ident() (Token, error) {
 		value, err := tb.String()
 		if err != nil {
 			err = fmt.Errorf("parse function: %w", err)
-		} else if isASCIICaseInsensitiveMatch(value, "url") {
+		} else if EqualCaseInsensitive(value, "url") {
 			return s.url(tb, start)
 		}
 		return Token{
@@ -821,11 +821,11 @@ func toASCIILower(r rune) rune {
 	return r
 }
 
-// isASCIICaseInsensitiveMatch reports whether s1 is an
+// EqualCaseInsensitive reports whether s1 is an
 // [ASCII case-insensitive match] for s2.
 //
 // [ASCII case-insensitive match]: https://infra.spec.whatwg.org/#ascii-case-insensitive
-func isASCIICaseInsensitiveMatch(s1, s2 string) bool {
+func EqualCaseInsensitive(s1, s2 string) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
