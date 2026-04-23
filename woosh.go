@@ -30,17 +30,60 @@ func Process(dst io.Writer, opts *Options) error {
 		}
 	}
 	w := css.NewWriter(dst)
-	for _, layer := range s.layers {
+	for i, layer := range s.layers {
+		inLayer := i < len(s.layers)-1
+		if inLayer {
+			err := writeTokenSeq(w, func(yield func(css.Token) bool) {
+				if !yield(css.Token{Kind: css.AtKeywordKind, Value: "layer"}) {
+					return
+				}
+				if !yield(css.Token{Kind: css.WhitespaceKind}) {
+					return
+				}
+				if layer.name != "" {
+					for tok := range layerNameTokens(layer.name) {
+						if !yield(tok) {
+							return
+						}
+					}
+					if !yield(css.Token{Kind: css.WhitespaceKind}) {
+						return
+					}
+				}
+				if !yield(css.Token{Kind: css.LBraceKind}) {
+					return
+				}
+				if !yield(css.Token{Kind: css.WhitespaceKind}) {
+					return
+				}
+			})
+			if err != nil {
+				return err
+			}
+		}
+
 		for _, rule := range layer.rules {
 			if rule.AtRule == "theme" {
 				continue
 			}
-			for tok := range rule.Tokens() {
-				if err := w.WriteToken(tok); err != nil {
-					return err
-				}
+			if err := writeTokenSeq(w, rule.Tokens()); err != nil {
+				return err
 			}
 			if err := w.WriteToken(css.Token{Kind: css.WhitespaceKind}); err != nil {
+				return err
+			}
+		}
+
+		if inLayer {
+			err := writeTokenSeq(w, func(yield func(css.Token) bool) {
+				if !yield(css.Token{Kind: css.RBraceKind}) {
+					return
+				}
+				if !yield(css.Token{Kind: css.WhitespaceKind}) {
+					return
+				}
+			})
+			if err != nil {
 				return err
 			}
 		}
@@ -194,6 +237,33 @@ func parseLayerName(tokens []css.Token) string {
 		}
 	}
 	return sb.String()
+}
+
+func layerNameTokens(s string) iter.Seq[css.Token] {
+	return func(yield func(css.Token) bool) {
+		for part := range strings.SplitAfterSeq(s, ".") {
+			part, hasDot := strings.CutSuffix(part, ".")
+			if part != "" {
+				if !yield(css.Token{Kind: css.IdentKind, Value: part}) {
+					return
+				}
+			}
+			if hasDot {
+				if !yield(css.Token{Kind: css.DelimKind, Value: "."}) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func writeTokenSeq(w *css.Writer, tokens iter.Seq[css.Token]) error {
+	for tok := range tokens {
+		if err := w.WriteToken(tok); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func trimWhitespaceLeft(tokens []css.Token) []css.Token {
