@@ -39,20 +39,22 @@ func SplitCommaSeparatedValues(tokens []Token) iter.Seq[[]Token] {
 	return func(yield func([]Token) bool) {
 		i, j := 0, 0
 		for {
-			v, tail, _ := cutValue(tokens[j:])
+			v, _, _ := cutValue(tokens[j:])
 			if v.Kind() == CommaKind {
 				if !yield(tokens[i:j]) {
 					return
 				}
-				i = j + len(tail)
+				j += len(v)
+				i = j
+				continue
 			}
-			if len(tail) == 0 {
-				if !yield(tokens[i:j]) {
+			if len(v) == 0 {
+				if !yield(tokens[i:]) {
 					return
 				}
 				break
 			}
-			j += len(tail)
+			j += len(v)
 		}
 	}
 }
