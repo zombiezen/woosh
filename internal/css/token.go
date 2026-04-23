@@ -65,6 +65,23 @@ func (tok Token) String() string {
 	}
 }
 
+// TrimWhitespace returns a slice of s with all leading and trailing [WhitespaceKind] tokens removed.
+func TrimWhitespace[S ~[]Token](s S) S {
+	s = TrimLeftWhitespace(s)
+	for len(s) > 0 && s[len(s)-1].Kind == WhitespaceKind {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// TrimLeftWhitespace returns a slice of s with all leading [WhitespaceKind] tokens removed.
+func TrimLeftWhitespace[S ~[]Token](s S) S {
+	for len(s) > 0 && s[0].Kind == WhitespaceKind {
+		s = s[1:]
+	}
+	return s
+}
+
 // Kind is an enumeration of [Token] types.
 type Kind int
 

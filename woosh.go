@@ -197,7 +197,7 @@ func parseImport(rule *css.Rule) (*cssImport, error) {
 	if len(rule.Block) > 0 {
 		return nil, fmt.Errorf("parse @import: has block")
 	}
-	prelude := trimWhitespaceLeft(rule.Prelude)
+	prelude := css.TrimLeftWhitespace(rule.Prelude)
 	if len(prelude) == 0 {
 		return nil, fmt.Errorf("parse @import: empty")
 	}
@@ -206,7 +206,7 @@ func parseImport(rule *css.Rule) (*cssImport, error) {
 	}
 	imp := &cssImport{urlstr: prelude[0].Value}
 
-	prelude = trimWhitespaceLeft(prelude[1:])
+	prelude = css.TrimLeftWhitespace(prelude[1:])
 	for v := range css.SplitValues(prelude) {
 		switch v.Kind() {
 		case css.IdentKind:
@@ -261,15 +261,6 @@ func writeTokenSeq(w *css.Writer, tokens iter.Seq[css.Token]) error {
 	for tok := range tokens {
 		if err := w.WriteToken(tok); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func trimWhitespaceLeft(tokens []css.Token) []css.Token {
-	for i, tok := range tokens {
-		if tok.Kind != css.WhitespaceKind {
-			return tokens[i:]
 		}
 	}
 	return nil
