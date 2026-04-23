@@ -153,7 +153,7 @@ func cutValue(tokens []Token) (head Value, tail []Token, ok bool) {
 		// https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
 		if tokens[i].Kind == stack[len(stack)-1] {
 			stack = stack[:len(stack)-1]
-		} else if _, end, ok := blockKind(tokens[0].Kind); ok {
+		} else if _, end, ok := blockKind(tokens[i].Kind); ok {
 			stack = append(stack, end)
 		}
 	}
