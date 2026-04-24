@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -29,6 +30,28 @@ func Process(dst io.Writer, opts *Options) error {
 			return err
 		}
 	}
+
+	foundMap := make(map[string]struct{})
+	if len(s.classes) > 0 {
+		re, err := collectRegexp(maps.Values(s.classes))
+		if err != nil {
+			return err
+		}
+
+		for src := range s.options.Sources {
+			data, err := io.ReadAll(src)
+			src.Close()
+			if err != nil {
+				return fmt.Errorf("read source: %v", err)
+			}
+			for _, className := range re.FindAll(data, -1) {
+				foundMap[string(className)] = struct{}{}
+			}
+		}
+	}
+	found := slices.AppendSeq(make([]string, 0, len(foundMap)), maps.Keys(foundMap))
+	slices.Sort(found)
+
 	w := css.NewWriter(dst)
 	for i, layer := range s.layers {
 		inLayer := i < len(s.layers)-1
@@ -66,6 +89,20 @@ func Process(dst io.Writer, opts *Options) error {
 			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
 				continue
 			}
+			if uc := s.classes[rule]; uc != nil {
+				for _, className := range found {
+					for _, rule := range uc.ClassRules(className) {
+						if err := writeTokenSeq(w, rule.Tokens()); err != nil {
+							return err
+						}
+						if err := w.WriteToken(css.Token{Kind: css.WhitespaceKind}); err != nil {
+							return err
+						}
+					}
+				}
+				continue
+			}
+
 			if err := writeTokenSeq(w, rule.Tokens()); err != nil {
 				return err
 			}
@@ -88,18 +125,20 @@ func Process(dst io.Writer, opts *Options) error {
 			}
 		}
 	}
-	// TODO(soon): Write detected utilities.
+
 	return nil
 }
 
 type state struct {
 	layers  []*layer
+	classes map[*css.Rule]utilityClass
 	options Options
 }
 
 func newState(opts *Options) *state {
 	s := &state{
-		layers: []*layer{{}},
+		layers:  []*layer{{}},
+		classes: make(map[*css.Rule]utilityClass),
 	}
 	if opts != nil {
 		s.options = *opts
@@ -159,6 +198,13 @@ func (s *state) process(u *url.URL, l *layer) error {
 					}
 				}
 			}
+		case css.EqualCaseInsensitive(rule.AtRule, "utility"):
+			uuc, err := newUserUtilityClass(rule)
+			if err != nil {
+				return err
+			}
+			s.classes[rule] = uuc
+			l.rules = append(l.rules, rule)
 		default:
 			l.rules = append(l.rules, rule)
 		}
