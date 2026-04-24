@@ -140,6 +140,40 @@ func (decl *Declaration) IsCustomProperty() bool {
 	return decl != nil && isCustomPropertyName(decl.Name)
 }
 
+// Tokens returns an iterator over the tokens that this declaration represents.
+func (decl *Declaration) Tokens() iter.Seq[Token] {
+	return func(yield func(Token) bool) {
+		if !yield(Token{Kind: IdentKind, Value: decl.Name, Start: decl.NameStart}) {
+			return
+		}
+		if !yield(Token{Kind: ColonKind}) {
+			return
+		}
+		if !yield(Token{Kind: WhitespaceKind}) {
+			return
+		}
+		for _, tok := range decl.Value {
+			if !yield(tok) {
+				return
+			}
+		}
+		if decl.Important {
+			if !yield(Token{Kind: WhitespaceKind}) {
+				return
+			}
+			if !yield(Token{Kind: DelimKind, Value: "!"}) {
+				return
+			}
+			if !yield(Token{Kind: IdentKind, Value: "important"}) {
+				return
+			}
+		}
+		if !yield(Token{Kind: SemicolonKind}) {
+			return
+		}
+	}
+}
+
 func isCustomPropertyName(name string) bool {
 	const prefix = "--"
 	return len(name) > len(prefix) && strings.HasPrefix(name, prefix)
