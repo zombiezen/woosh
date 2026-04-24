@@ -1,0 +1,4 @@
+*.css eol=lf
+*.go eol=lf
+go.mod eol=lf
+go.sum eol=lf

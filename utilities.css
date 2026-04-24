@@ -1,9 +1,9 @@
 @utility visible {
-  visibility: visible;
+	visibility: visible;
 }
 @utility hidden {
-  visibility: hidden;
+	visibility: hidden;
 }
 @utility collapse {
-  visibility: collapse;
+	visibility: collapse;
 }
