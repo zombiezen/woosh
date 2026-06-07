@@ -91,7 +91,7 @@ func Process(dst io.Writer, opts *Options) error {
 			}
 			if uc := s.classes[rule]; uc != nil {
 				for _, className := range found {
-					for _, rule := range uc.ClassRules(className) {
+					for _, rule := range uc.classRules(className) {
 						if err := writeTokenSeq(w, rule.Tokens()); err != nil {
 							return err
 						}
@@ -131,14 +131,14 @@ func Process(dst io.Writer, opts *Options) error {
 
 type state struct {
 	layers  []*layer
-	classes map[*css.Rule]utilityClass
+	classes map[*css.Rule]*utilityClass
 	options Options
 }
 
 func newState(opts *Options) *state {
 	s := &state{
 		layers:  []*layer{{}},
-		classes: make(map[*css.Rule]utilityClass),
+		classes: make(map[*css.Rule]*utilityClass),
 	}
 	if opts != nil {
 		s.options = *opts
@@ -199,11 +199,11 @@ func (s *state) process(u *url.URL, l *layer) error {
 				}
 			}
 		case css.EqualCaseInsensitive(rule.AtRule, "utility"):
-			uuc, err := newUserUtilityClass(rule)
+			uc, err := newUtilityClass(rule)
 			if err != nil {
 				return err
 			}
-			s.classes[rule] = uuc
+			s.classes[rule] = uc
 			l.rules = append(l.rules, rule)
 		default:
 			l.rules = append(l.rules, rule)
