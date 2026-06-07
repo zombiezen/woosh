@@ -1,0 +1,9 @@
+.foo {
+	color: red;
+}
+@utility hidden {
+	visibility: hidden;
+}
+.bar {
+	color: blue;
+}
