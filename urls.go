@@ -1,15 +1,11 @@
 package woosh
 
 import (
-	"embed"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
-	"strings"
 )
 
 // A URLOpener can read the contents of a URL.
@@ -18,11 +14,10 @@ type URLOpener interface {
 	OpenURL(u *url.URL) (io.ReadCloser, error)
 }
 
-// DefaultURLOpener returns a [URLOpener] that handles file:// and woosh:// URLs.
+// DefaultURLOpener returns a [URLOpener] that handles file:// URLs.
 func DefaultURLOpener() URLOpener {
 	return URLOpenerMux{
-		"file":  FileURLOpener(),
-		"woosh": BuiltinURLOpener(),
+		"file": FileURLOpener(),
 	}
 }
 
@@ -38,43 +33,6 @@ func (fileURLOpener) OpenURL(u *url.URL) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("%v not supported", u)
 	}
 	return os.Open(filepath.FromSlash(u.Path))
-}
-
-//go:embed theme.css
-//go:embed preflight.css
-//go:embed utilities.css
-//go:embed woosh.css
-var builtinStylesheets embed.FS
-
-type fsURLOpener struct {
-	scheme string
-	fs     fs.FS
-}
-
-// BuiltinURLOpener returns a [URLOpener] that handles woosh:// URLs.
-func BuiltinURLOpener() URLOpener {
-	return &fsURLOpener{
-		scheme: "woosh",
-		fs:     builtinStylesheets,
-	}
-}
-
-func (o *fsURLOpener) OpenURL(u *url.URL) (io.ReadCloser, error) {
-	if u.Scheme != o.scheme || u.Host != "" {
-		return nil, fmt.Errorf("%v not supported", u)
-	}
-	f, err := o.fs.Open(strings.TrimPrefix(path.Clean(u.Path), "/"))
-	if err != nil {
-		return nil, fmt.Errorf("open %v: %v", u, err)
-	}
-	if info, err := f.Stat(); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("open %v: %v", u, err)
-	} else if mode := info.Mode(); !mode.IsRegular() {
-		f.Close()
-		return nil, fmt.Errorf("open %v: not a regular file", u)
-	}
-	return f, nil
 }
 
 // URLOpenerMux is a [URLOpener] that uses other [URLOpener] objects
