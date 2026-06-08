@@ -448,10 +448,8 @@ func (p *Parser) declaration(nested bool) (*Declaration, error) {
 	}
 	importantStart := finalWhitespaceStart - 2
 	decl.Important = importantStart >= 0 &&
-		decl.Value[importantStart].Kind == DelimKind &&
-		decl.Value[importantStart].Value == "!" &&
-		decl.Value[importantStart+1].Kind == IdentKind &&
-		EqualCaseInsensitive(decl.Value[importantStart+1].Value, "important")
+		decl.Value[importantStart].IsDelim('!') &&
+		decl.Value[importantStart+1].IsKeyword("important")
 	if decl.Important {
 		decl.Value = slices.Delete(decl.Value, importantStart, finalWhitespaceStart)
 	}

@@ -141,23 +141,34 @@ func (v *Value) UnmarshalText(text []byte) error {
 // If tokens starts with an unclosed block,
 // then cutValue returns (tokens, tokens[len(tokens):], false).
 func cutValue(tokens []Token) (head Value, tail []Token, ok bool) {
+	n, ok := ValueLength(tokens)
+	return tokens[:n], tokens[n:], ok
+}
+
+// ValueLength finds the end of the component value
+// that starts at the beginning of the slice of tokens.
+// ok is true if and only if tokens starts with a preserved token
+// or a properly closed block.
+// If tokens starts with an unclosed block,
+// then ValueLength returns (len(tokens), false).
+func ValueLength(tokens []Token) (n int, ok bool) {
 	if len(tokens) == 0 {
-		return nil, nil, false
+		return 0, false
 	}
 	_, end, ok := blockKind(tokens[0].Kind)
 	if !ok {
-		return tokens[:1], tokens[1:], true
+		return 1, true
 	}
 	stack := []Kind{end}
-	i := 1
-	for ; len(stack) > 0 && i < len(tokens); i++ {
+	n = 1
+	for ; len(stack) > 0 && n < len(tokens); n++ {
 		// CSS parsing only considers the top of the stack.
 		// https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
-		if tokens[i].Kind == stack[len(stack)-1] {
+		if tokens[n].Kind == stack[len(stack)-1] {
 			stack = stack[:len(stack)-1]
-		} else if _, end, ok := blockKind(tokens[i].Kind); ok {
+		} else if _, end, ok := blockKind(tokens[n].Kind); ok {
 			stack = append(stack, end)
 		}
 	}
-	return tokens[:i], tokens[i:], len(stack) == 0
+	return n, len(stack) == 0
 }

@@ -29,6 +29,32 @@ func (tok Token) IsIDHash() bool {
 	return tok.Kind == HashKind && startsWithIdentSequence([]rune(tok.Value))
 }
 
+// IsDelim reports whether the token represents the given delimiter.
+func (tok Token) IsDelim(c rune) bool {
+	if tok.Kind != DelimKind || tok.Value == "" {
+		return false
+	}
+	if !isASCII(c) || len(tok.Value) != 1 || !isASCII(rune(tok.Value[0])) {
+		// Slow path (that shouldn't occur): actually have to decode.
+		v, size := utf8.DecodeRuneInString(tok.Value)
+		return v == c && size == len(tok.Value)
+	}
+	// Fast path: byte comparison.
+	return rune(tok.Value[0]) == c
+}
+
+// IsKeyword reports whether the token is an identifier that matches the given string
+// (ignoring case).
+func (tok Token) IsKeyword(keyword string) bool {
+	return tok.Kind == IdentKind && EqualCaseInsensitive(tok.Value, keyword)
+}
+
+// IsFunction reports whether the token is the start of a function that matches the given string
+// (ignoring case).
+func (tok Token) IsFunction(funcName string) bool {
+	return tok.Kind == FunctionKind && EqualCaseInsensitive(tok.Value, funcName)
+}
+
 // IsUnrestrictedHash reports whether the token is a [hash token]
 // with the "unrestricted" type flag.
 //

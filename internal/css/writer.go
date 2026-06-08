@@ -310,7 +310,7 @@ func requiresCommentSeparator(t1, t2 Token) bool {
 			t2.Kind == FunctionKind ||
 			t2.Kind == URLKind ||
 			t2.Kind == BadURLKind ||
-			t2.Kind == DelimKind && t2.Value == "-" ||
+			t2.IsDelim('-') ||
 			t2.Kind == NumberKind ||
 			t2.Kind == PercentageKind ||
 			t2.Kind == DimensionKind ||
@@ -321,7 +321,7 @@ func requiresCommentSeparator(t1, t2 Token) bool {
 			t2.Kind == FunctionKind ||
 			t2.Kind == URLKind ||
 			t2.Kind == BadURLKind ||
-			t2.Kind == DelimKind && t2.Value == "-" ||
+			t2.IsDelim('-') ||
 			t2.Kind == NumberKind ||
 			t2.Kind == PercentageKind ||
 			t2.Kind == DimensionKind ||
@@ -333,7 +333,7 @@ func requiresCommentSeparator(t1, t2 Token) bool {
 				t2.Kind == FunctionKind ||
 				t2.Kind == URLKind ||
 				t2.Kind == BadURLKind ||
-				t2.Kind == DelimKind && t2.Value == "-" ||
+				t2.IsDelim('-') ||
 				t2.Kind == NumberKind ||
 				t2.Kind == PercentageKind ||
 				t2.Kind == DimensionKind ||
@@ -343,12 +343,12 @@ func requiresCommentSeparator(t1, t2 Token) bool {
 				t2.Kind == FunctionKind ||
 				t2.Kind == URLKind ||
 				t2.Kind == BadURLKind ||
-				t2.Kind == DelimKind && t2.Value == "-" ||
+				t2.IsDelim('-') ||
 				t2.Kind == CDCKind
 		case ".", "+":
 			return t2.Kind == NumberKind || t2.Kind == PercentageKind || t2.Kind == DimensionKind
 		case "/":
-			return t2.Kind == DelimKind && t2.Value == "*"
+			return t2.IsDelim('*')
 		}
 	}
 	return false

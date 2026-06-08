@@ -28,7 +28,7 @@ func newUtilityClass(rule *css.Rule) (*utilityClass, error) {
 	prelude := css.TrimWhitespace(rule.Prelude)
 	if len(prelude) == 0 || len(prelude) > 2 ||
 		prelude[0].Kind != css.IdentKind ||
-		len(prelude) == 2 && !(prelude[1].Kind == css.DelimKind && prelude[1].Value == "*") {
+		len(prelude) == 2 && !prelude[1].IsDelim('*') {
 		p := collapseTokenString(prelude)
 		return nil, fmt.Errorf("parse user @utility: must have a single identifier (got %s)", p)
 	}
@@ -112,7 +112,7 @@ func (uc *utilityClass) classRules(className string) []*css.Rule {
 		// TODO(soon): Rewrite value in newRule.Block.
 		_ = classValue
 		for _, tok := range rule.Prelude {
-			if tok.Kind == css.DelimKind && tok.Value == "&" {
+			if tok.IsDelim('&') {
 				newRule.Prelude = append(newRule.Prelude,
 					css.Token{Kind: css.DelimKind, Value: "."},
 					css.Token{Kind: css.IdentKind, Value: className},

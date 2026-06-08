@@ -254,18 +254,14 @@ func parseImport(rule *css.Rule) (*cssImport, error) {
 
 	prelude = css.TrimLeftWhitespace(prelude[1:])
 	for v := range css.SplitValues(prelude) {
-		switch v.Kind() {
-		case css.IdentKind:
-			if css.EqualCaseInsensitive(v[0].Value, "layer") {
-				imp.layerName = ""
-				imp.hasLayer = true
-			}
-		case css.FunctionKind:
-			if css.EqualCaseInsensitive(v[0].Value, "layer") {
-				imp.hasLayer = true
-				args, _ := v.BlockContents()
-				imp.layerName = parseLayerName(args)
-			}
+		switch {
+		case len(v) > 0 && v[0].IsKeyword("layer"):
+			imp.layerName = ""
+			imp.hasLayer = true
+		case len(v) > 0 && v[0].IsFunction("layer"):
+			imp.hasLayer = true
+			args, _ := v.BlockContents()
+			imp.layerName = parseLayerName(args)
 		}
 	}
 
@@ -275,10 +271,10 @@ func parseImport(rule *css.Rule) (*cssImport, error) {
 func parseLayerName(tokens []css.Token) string {
 	sb := new(strings.Builder)
 	for arg := range css.SplitValues(tokens) {
-		switch kind := arg.Kind(); {
-		case kind == css.IdentKind:
+		switch {
+		case arg.Kind() == css.IdentKind:
 			sb.WriteString(arg[0].Value)
-		case kind == css.DelimKind && arg[0].Value == ".":
+		case arg[0].IsDelim('.'):
 			sb.WriteString(".")
 		}
 	}

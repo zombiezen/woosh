@@ -736,6 +736,61 @@ func (br *bufferedReader) peek(n int8) ([]rune, error) {
 	return br.buf[br.rpos:wantEnd], nil
 }
 
+// IntegerEnd returns the length in bytes of the integer at the beginning of s,
+// or 0 if s does not start with an integer.
+func IntegerEnd(s string) int {
+	i := 0
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+		i++
+	}
+	if i >= len(s) || !isDigit(rune(s[i])) {
+		return 0
+	}
+	i++
+	for i < len(s) && isDigit(rune(s[i])) {
+		i++
+	}
+	return i
+}
+
+// NumberEnd returns the length in bytes of the number at the beginning of s,
+// or 0 if s does not start with a number.
+func NumberEnd(s string) int {
+	i := 0
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+		i++
+	}
+	numStart := i
+	for i < len(s) && isDigit(rune(s[i])) {
+		i++
+	}
+	if i+1 < len(s) && s[i] == '.' && isDigit(rune(s[i+1])) {
+		i += 2
+		for i < len(s) && isDigit(rune(s[i])) {
+			i++
+		}
+	}
+	if i == numStart {
+		return 0
+	}
+
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		j := i + 1
+		if j < len(s) && (s[j] == '-' || s[j] == '+') {
+			j++
+		}
+		if j >= len(s) || !isDigit(rune(s[j])) {
+			return i
+		}
+		i = j + 1
+		for i < len(s) && isDigit(rune(s[i])) {
+			i++
+		}
+	}
+
+	return i
+}
+
 func isWhitespace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n'
 }
