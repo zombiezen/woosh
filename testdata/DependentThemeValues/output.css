@@ -1,0 +1,7 @@
+:root {
+	--foo: 1em;
+	--bar: calc(var(--foo) + 2em);
+}
+.quux {
+	padding-top: var(--bar);
+}

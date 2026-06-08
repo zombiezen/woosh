@@ -283,26 +283,53 @@ func (s *state) themePropertyNames() iter.Seq[string] {
 
 func (s *state) usedVariableNames() map[string]struct{} {
 	result := make(map[string]struct{})
+	findReferences := func(tokens []css.Token) {
+		for i := 0; i < len(tokens); {
+			if tokens[i].IsFunction("var") {
+				if n, ok := css.ValueLength(tokens[i:]); ok {
+					if n == 3 && tokens[i+1].Kind == css.IdentKind {
+						result[tokens[i+1].Value] = struct{}{}
+					}
+					i += n
+					continue
+				}
+			}
+			i++
+		}
+	}
+
 	for _, l := range s.layers {
 		for _, rule := range l.rules {
 			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
 				continue
 			}
-			for i := 0; i < len(rule.Block); {
-				if rule.Block[i].IsFunction("var") {
-					if n, ok := css.ValueLength(rule.Block[i:]); ok {
-						if n == 3 && rule.Block[i+1].Kind == css.IdentKind {
-							result[rule.Block[i+1].Value] = struct{}{}
-						}
-						i += n
-						continue
-					}
-				}
-				i++
-			}
+			findReferences(rule.Block)
 		}
 	}
-	return result
+
+	// Search for interdependent theme variables until we encounter the fixpoint.
+	for {
+		oldLen := len(result)
+		for _, l := range s.layers {
+			for _, rule := range l.rules {
+				if !css.EqualCaseInsensitive(rule.AtRule, "theme") {
+					continue
+				}
+				for part := range rule.BlockContents() {
+					decl := part.Declaration()
+					if decl == nil {
+						continue
+					}
+					if _, ok := result[decl.Name]; ok {
+						findReferences(decl.Value)
+					}
+				}
+			}
+		}
+		if len(result) == oldLen {
+			return result
+		}
+	}
 }
 
 func (s *state) getOrCreateLayer(name string) *layer {

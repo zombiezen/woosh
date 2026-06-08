@@ -1,0 +1,8 @@
+@theme {
+	--foo: 1em;
+	--bar: calc(var(--foo) + 2em);
+	--baz: red;
+}
+.quux {
+	padding-top: var(--bar);
+}
