@@ -1,0 +1,3 @@
+@utility z-* {
+	z-index: --value(integer);
+}

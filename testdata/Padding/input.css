@@ -1,0 +1,7 @@
+@theme {
+	--spacing: 0.25rem;
+}
+@utility p-* {
+	padding: calc(var(--spacing) * --value(number));
+	padding: --value([length]);
+}

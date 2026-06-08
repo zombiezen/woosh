@@ -1,0 +1,9 @@
+:root {
+	--spacing: 0.25rem;
+}
+.p-2 {
+	padding: calc(var(--spacing) * 2);
+}
+.p-\[5px\] {
+	padding: 5px;
+}

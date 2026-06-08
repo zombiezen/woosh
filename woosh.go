@@ -26,14 +26,17 @@ type Options struct {
 func Process(dst io.Writer, opts *Options) error {
 	s := newState(opts)
 	for _, arg := range s.options.Entrypoints {
-		if err := s.process(arg, s.layers[len(s.layers)-1]); err != nil {
+		if err := s.importCSS(arg, s.layers[len(s.layers)-1]); err != nil {
 			return err
 		}
+	}
+	valueOpts := &valueFunctionOptions{
+		themeKeys: s.themePropertyNames(),
 	}
 
 	foundMap := make(map[string]struct{})
 	if len(s.classes) > 0 {
-		re, err := collectRegexp(maps.Values(s.classes))
+		re, err := collectRegexp(maps.Values(s.classes), valueOpts)
 		if err != nil {
 			return err
 		}
@@ -44,15 +47,33 @@ func Process(dst io.Writer, opts *Options) error {
 			if err != nil {
 				return fmt.Errorf("read source: %v", err)
 			}
-			for _, className := range re.FindAll(data, -1) {
-				foundMap[string(className)] = struct{}{}
+			for _, match := range re.FindAllSubmatch(data, -1) {
+				foundMap[string(match[1])] = struct{}{}
 			}
 		}
 	}
 	found := slices.AppendSeq(make([]string, 0, len(foundMap)), maps.Keys(foundMap))
 	slices.Sort(found)
 
+	// Rewrite utility classes.
+	for _, layer := range s.layers {
+		for i := 0; i < len(layer.rules); i++ {
+			uc := s.classes[layer.rules[i]]
+			if uc == nil {
+				continue
+			}
+			layer.rules = slices.Delete(layer.rules, i, i+1)
+			for _, className := range found {
+				for newRule := range uc.classRules(className, valueOpts) {
+					layer.rules = slices.Insert(layer.rules, i, newRule)
+					i++
+				}
+			}
+		}
+	}
+
 	w := css.NewWriter(dst)
+	usedVariableNames := s.usedVariableNames()
 	for i, layer := range s.layers {
 		inLayer := i < len(s.layers)-1
 		if inLayer {
@@ -87,22 +108,12 @@ func Process(dst io.Writer, opts *Options) error {
 
 		for _, rule := range layer.rules {
 			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
-				continue
-			}
-			if uc := s.classes[rule]; uc != nil {
-				for _, className := range found {
-					for _, rule := range uc.classRules(className) {
-						if err := writeTokenSeq(w, rule.Tokens()); err != nil {
-							return err
-						}
-						if err := w.WriteToken(css.Token{Kind: css.WhitespaceKind}); err != nil {
-							return err
-						}
-					}
+				rootRule := rewriteThemeRule(rule, usedVariableNames)
+				if rootRule == nil {
+					continue
 				}
-				continue
+				rule = rootRule
 			}
-
 			if err := writeTokenSeq(w, rule.Tokens()); err != nil {
 				return err
 			}
@@ -129,6 +140,36 @@ func Process(dst io.Writer, opts *Options) error {
 	return nil
 }
 
+func rewriteThemeRule(rule *css.Rule, usedVars map[string]struct{}) *css.Rule {
+	rootRule := &css.Rule{
+		Prelude: []css.Token{
+			{Kind: css.ColonKind},
+			{Kind: css.IdentKind, Value: "root"},
+			{Kind: css.WhitespaceKind},
+		},
+		Block: css.Value{
+			{Kind: css.LBraceKind},
+			{Kind: css.WhitespaceKind},
+		},
+	}
+	hasAny := false
+	for part := range rule.BlockContents() {
+		if decl := part.Declaration(); decl != nil {
+			if _, used := usedVars[decl.Name]; used {
+				rootRule.Block = slices.AppendSeq(rootRule.Block, decl.Tokens())
+				rootRule.Block = append(rootRule.Block, css.Token{Kind: css.WhitespaceKind})
+				hasAny = true
+			}
+		}
+	}
+	if !hasAny {
+		return nil
+	}
+	rootRule.Block = append(rootRule.Block, css.Token{Kind: css.WhitespaceKind})
+	rootRule.Block = append(rootRule.Block, css.Token{Kind: css.RBraceKind})
+	return rootRule
+}
+
 type state struct {
 	layers  []*layer
 	classes map[*css.Rule]*utilityClass
@@ -149,7 +190,7 @@ func newState(opts *Options) *state {
 	return s
 }
 
-func (s *state) process(u *url.URL, l *layer) error {
+func (s *state) importCSS(u *url.URL, l *layer) error {
 	rc, err := s.options.URLOpener.OpenURL(u)
 	if err != nil {
 		return err
@@ -180,7 +221,7 @@ func (s *state) process(u *url.URL, l *layer) error {
 			if imp.hasLayer {
 				importLayer = s.getOrCreateLayer(imp.layerName)
 			}
-			if err := s.process(importURL, importLayer); err != nil {
+			if err := s.importCSS(importURL, importLayer); err != nil {
 				return err
 			}
 		case css.EqualCaseInsensitive(rule.AtRule, "layer"):
@@ -211,6 +252,57 @@ func (s *state) process(u *url.URL, l *layer) error {
 	}
 
 	return nil
+}
+
+// themePropertyNames returns the property names that appear in @theme rules
+// in layer order.
+func (s *state) themePropertyNames() iter.Seq[string] {
+	return func(yield func(string) bool) {
+		m := make(map[string]struct{})
+		for _, l := range s.layers {
+			for _, rule := range l.rules {
+				if !css.EqualCaseInsensitive(rule.AtRule, "theme") {
+					continue
+				}
+				for part := range rule.BlockContents() {
+					decl := part.Declaration()
+					if decl == nil {
+						continue
+					}
+					if _, redefined := m[decl.Name]; !redefined {
+						if !yield(decl.Name) {
+							return
+						}
+						m[decl.Name] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *state) usedVariableNames() map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, l := range s.layers {
+		for _, rule := range l.rules {
+			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
+				continue
+			}
+			for i := 0; i < len(rule.Block); {
+				if rule.Block[i].IsFunction("var") {
+					if n, ok := css.ValueLength(rule.Block[i:]); ok {
+						if n == 3 && rule.Block[i+1].Kind == css.IdentKind {
+							result[rule.Block[i+1].Value] = struct{}{}
+						}
+						i += n
+						continue
+					}
+				}
+				i++
+			}
+		}
+	}
+	return result
 }
 
 func (s *state) getOrCreateLayer(name string) *layer {
