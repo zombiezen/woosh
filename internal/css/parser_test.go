@@ -159,7 +159,7 @@ func TestSplitBlockContents(t *testing.T) {
 				ToBlockPart(&Declaration{
 					Name:      "background-color",
 					NameStart: Location{Offset: 0, Line: 1},
-					Value: Value{
+					Value: []Token{
 						{
 							Kind:  IdentKind,
 							Value: "blue",
@@ -176,7 +176,7 @@ func TestSplitBlockContents(t *testing.T) {
 				ToBlockPart(&Declaration{
 					Name:      "color",
 					NameStart: Location{Offset: 0, Line: 1},
-					Value: Value{
+					Value: []Token{
 						{
 							Kind:  IdentKind,
 							Value: "white",
@@ -187,7 +187,7 @@ func TestSplitBlockContents(t *testing.T) {
 				ToBlockPart(&Declaration{
 					Name:      "background-color",
 					NameStart: Location{Offset: 14, Line: 1},
-					Value: Value{
+					Value: []Token{
 						{
 							Kind:  IdentKind,
 							Value: "blue",
@@ -198,7 +198,7 @@ func TestSplitBlockContents(t *testing.T) {
 				ToBlockPart(&Declaration{
 					Name:      "font-family",
 					NameStart: Location{Offset: 38, Line: 1},
-					Value: Value{
+					Value: []Token{
 						{
 							Kind:  IdentKind,
 							Value: "monospace",
@@ -321,7 +321,7 @@ func TestSplitBlockContents(t *testing.T) {
 				ToBlockPart(&Declaration{
 					Name:      "--foo",
 					NameStart: Location{Offset: 0, Line: 1},
-					Value: Value{
+					Value: []Token{
 						{
 							Kind:  IdentKind,
 							Value: "hover",

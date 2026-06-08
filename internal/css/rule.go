@@ -129,7 +129,7 @@ func (rule *Rule) UnmarshalText(text []byte) error {
 type Declaration struct {
 	Name      string
 	NameStart Location
-	Value     Value
+	Value     []Token
 	Important bool
 }
 
