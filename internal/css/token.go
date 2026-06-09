@@ -1,3 +1,6 @@
+// Copyright 2026 Roxy Light
+// SPDX-License-Identifier: MIT
+
 //go:generate go tool stringer -linecomment -output=token_string.go -type=Kind token.go
 
 package css

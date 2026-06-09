@@ -1,4 +1,8 @@
+// Copyright 2026 Roxy Light
+// SPDX-License-Identifier: MIT
+
 // Package woosh provides a CSS preprocessor
+// that supports utility classes with optional suffixes.
 package woosh
 
 import (

@@ -1,3 +1,6 @@
+// Copyright 2026 Roxy Light
+// SPDX-License-Identifier: MIT
+
 // Package multierror provides a type for collecting errors.
 package multierror
 

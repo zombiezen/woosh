@@ -1,3 +1,6 @@
+// Copyright 2026 Roxy Light
+// SPDX-License-Identifier: MIT
+
 package woosh
 
 import (
