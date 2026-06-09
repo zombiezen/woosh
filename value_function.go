@@ -1,6 +1,7 @@
 package woosh
 
 import (
+	"fmt"
 	"io"
 	"iter"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"zombiezen.com/go/woosh/internal/css"
+	"zombiezen.com/go/woosh/internal/multierror"
 )
 
 type valueFunctionOptions struct {
@@ -68,7 +70,9 @@ func replaceValueFunction(tokens []css.Token, value string, opts *valueFunctionO
 			return tokens, true
 		}
 		var usage valueFunctionArguments
-		usage.merge(tokens[i : i+n])
+		if err := usage.merge(tokens[i : i+n]); err != nil {
+			return nil, false
+		}
 		replacement, ok := usage.match(value, opts)
 		if !ok {
 			return nil, false
@@ -147,26 +151,32 @@ func (args *valueFunctionArguments) match(value string, opts *valueFunctionOptio
 
 // collect merges the arguments of any --value() functions
 // that appear in the sequence of tokens.
-func (args *valueFunctionArguments) collect(tokens []css.Token) {
+func (args *valueFunctionArguments) collect(tokens []css.Token) error {
+	var allErrors multierror.Collector
 	for i := 0; i < len(tokens); {
 		if isValueFunction(tokens[i]) {
 			n, ok := css.ValueLength(tokens[i:])
 			if ok {
-				args.merge(tokens[i : i+n])
+				allErrors.Add(args.merge(tokens[i : i+n]))
 			}
 			i += n
 		} else {
 			i++
 		}
 	}
+	return allErrors.Error()
 }
 
-// merge merges the arguments of the --value() to the usage.
-func (args *valueFunctionArguments) merge(v css.Value) {
-	if len(v) == 0 || !isValueFunction(v[0]) {
-		return
+// merge merges the arguments of the --value() function to the usage.
+func (args *valueFunctionArguments) merge(v css.Value) error {
+	if len(v) == 0 {
+		return fmt.Errorf("internal error: merge --value() arguments on empty value")
+	}
+	if !isValueFunction(v[0]) {
+		return css.ErrorWithLocation("", v[0].Start, fmt.Errorf("%s is not a --value() function", collapseTokenString(v)))
 	}
 	contents, _ := v.BlockContents()
+	var argErrors multierror.Collector
 	for arg := range css.SplitCommaSeparatedValues(contents) {
 		arg = css.TrimWhitespace(arg)
 		switch {
@@ -180,6 +190,9 @@ func (args *valueFunctionArguments) merge(v css.Value) {
 				args.bareValues |= bareValueRatio
 			case css.EqualCaseInsensitive(arg[0].Value, "percentage"):
 				args.bareValues |= bareValuePercentage
+			default:
+				err := css.ErrorWithLocation("", arg[0].Start, fmt.Errorf("unrecognized --value() argument: %s", arg[0].Value))
+				argErrors.Add(err)
 			}
 		case len(arg) == 1 && arg[0].Kind == css.StringKind:
 			if !slices.Contains(args.literals, arg[0].Value) {
@@ -187,10 +200,19 @@ func (args *valueFunctionArguments) merge(v css.Value) {
 			}
 		case len(arg) == 2 && arg[0].Kind == css.IdentKind && arg[1].IsDelim('*'):
 			args.themeKeyPrefixes = append(args.themeKeyPrefixes, arg[0].Value)
+		case len(arg) >= 2 && arg[0].Kind == css.LBracketKind && arg[len(arg)-1].Kind == css.RBracketKind:
+			newFlags := parseArbitraryValueArgument(arg[1 : len(arg)-1])
+			if newFlags == 0 {
+				err := css.ErrorWithLocation("", arg[0].Start, fmt.Errorf("unrecognized --value() argument: %s", collapseTokenString(arg)))
+				argErrors.Add(err)
+			}
+			args.arbitraryValues |= newFlags
 		default:
-			args.arbitraryValues |= parseArbitraryValueArgument(arg)
+			err := css.ErrorWithLocation("", arg[0].Start, fmt.Errorf("unrecognized --value() argument: %s", collapseTokenString(arg)))
+			argErrors.Add(err)
 		}
 	}
+	return argErrors.Error()
 }
 
 // isValueFunction reports whether tok is the first token of a --value() function call.
@@ -255,19 +277,14 @@ const (
 
 // parseArbitraryValueArgument parses a single argument of a --value() function
 // into [arbitraryValueFlags].
+// It is assumed the brackets surrounding the argument have already been stripped.
 // It returns zero if the argument does not describe an arbitrary value.
 func parseArbitraryValueArgument(arg []css.Token) arbitraryValueFlags {
-	if len(arg) < 3 {
+	arg = css.TrimWhitespace(arg)
+	if len(arg) != 1 {
 		return 0
 	}
-	if arg[0].Kind != css.LBracketKind || arg[len(arg)-1].Kind != css.RBracketKind {
-		return 0
-	}
-	inner := css.TrimWhitespace(arg[1 : len(arg)-1])
-	if len(inner) != 1 {
-		return 0
-	}
-	switch tok := inner[0]; {
+	switch tok := arg[0]; {
 	case tok.IsKeyword("absolute-size"):
 		return arbitraryValueAbsoluteSize
 	case tok.IsKeyword("angle"):

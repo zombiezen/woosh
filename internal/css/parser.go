@@ -1,11 +1,12 @@
 package css
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+
+	"zombiezen.com/go/woosh/internal/multierror"
 )
 
 // A Parser groups chunks of tokens according to the [CSS parsing stage].
@@ -37,17 +38,17 @@ func ParseTokens(tokens []Token) *Parser {
 // [stylesheet entry point]: https://www.w3.org/TR/css-syntax-3/#parse-stylesheet
 // [list of rules entry point]: https://www.w3.org/TR/css-syntax-3/#parse-list-of-rules
 func (p *Parser) NextRule() (*Rule, error) {
-	var parseError error
+	var allErrors multierror.Collector
 	for {
 		p.stream.Mark()
 		tok, err := p.stream.Next()
 		if err != nil {
-			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
+			allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css rule: %w", err)))
 		}
 		switch tok.Kind {
 		case EOFKind:
 			p.stream.DiscardMark()
-			return nil, parseError
+			return nil, allErrors.Error()
 		case WhitespaceKind:
 			// Ignore.
 			p.stream.DiscardMark()
@@ -58,24 +59,24 @@ func (p *Parser) NextRule() (*Rule, error) {
 			} else {
 				p.stream.RestoreMark()
 				r, err := p.qualifiedRule(EOFKind, false)
-				parseError = errors.Join(parseError, err)
+				allErrors.Add(err)
 				if r != nil {
-					return r, parseError
+					return r, allErrors.Error()
 				}
 			}
 		case AtKeywordKind:
 			p.stream.DiscardMark()
 			r, err := p.atRule(tok.Value, tok.Start, false)
-			parseError = errors.Join(parseError, err)
+			allErrors.Add(err)
 			if r != nil {
-				return r, parseError
+				return r, allErrors.Error()
 			}
 		default:
 			p.stream.RestoreMark()
 			r, err := p.qualifiedRule(EOFKind, false)
-			parseError = errors.Join(parseError, err)
+			allErrors.Add(err)
 			if r != nil {
-				return r, parseError
+				return r, allErrors.Error()
 			}
 		}
 	}
@@ -87,30 +88,31 @@ func (p *Parser) atRule(name string, loc Location, nested bool) (*Rule, error) {
 		AtLocation: loc,
 	}
 
-	var parseError error
+	var allErrors multierror.Collector
 	for {
 		p.stream.Mark()
 		tok, err := p.stream.Next()
 		if err != nil {
-			parseError = errors.Join(parseError, fmt.Errorf("parse css @%s rule: %w", name, err))
+			allErrors.Add(ErrorWithLocation("", loc, fmt.Errorf("parse css @%s rule: %w", name, err)))
 		}
 		switch tok.Kind {
 		case EOFKind, SemicolonKind:
 			p.stream.DiscardMark()
-			return r, parseError
+			return r, allErrors.Error()
 		case LBraceKind:
 			p.stream.RestoreMark()
 			var err error
 			r.Block, err = p.block(nil)
 			if err != nil {
-				// TODO(soon): Split apart err and wrap each error individually.
-				parseError = errors.Join(parseError, fmt.Errorf("parse css @%s rule: %w", name, err))
+				for err := range multierror.All(err) {
+					allErrors.Add(fmt.Errorf("parse css @%s rule: %w", name, err))
+				}
 			}
-			return r, parseError
+			return r, allErrors.Error()
 		case RBraceKind:
 			if nested {
 				p.stream.RestoreMark()
-				return r, parseError
+				return r, allErrors.Error()
 			} else {
 				p.stream.DiscardMark()
 				r.Prelude = append(r.Prelude, tok)
@@ -120,8 +122,9 @@ func (p *Parser) atRule(name string, loc Location, nested bool) (*Rule, error) {
 			var err error
 			r.Prelude, err = p.value(r.Prelude)
 			if err != nil {
-				// TODO(soon): Split apart err and wrap each error individually.
-				parseError = errors.Join(parseError, fmt.Errorf("parse css @%s rule: %w", name, err))
+				for err := range multierror.All(err) {
+					allErrors.Add(fmt.Errorf("parse css @%s rule: %w", name, err))
+				}
 			}
 		}
 	}
@@ -130,31 +133,32 @@ func (p *Parser) atRule(name string, loc Location, nested bool) (*Rule, error) {
 func (p *Parser) qualifiedRule(stop Kind, nested bool) (*Rule, error) {
 	r := new(Rule)
 
-	var parseError error
+	var allErrors multierror.Collector
 	for {
 		p.stream.Mark()
 		tok, err := p.stream.Next()
 		if err != nil {
-			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
+			allErrors.Add(fmt.Errorf("parse css rule: %w", err))
 		}
 		switch tok.Kind {
 		case EOFKind, stop:
 			p.stream.RestoreMark()
-			return nil, parseError
+			return nil, allErrors.Error()
 		case LBraceKind:
 			p.stream.RestoreMark()
 			var err error
 			r.Block, err = p.block(nil)
 			if err != nil {
-				// TODO(soon): Split apart err and wrap each error individually.
-				parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
+				for err := range multierror.All(err) {
+					allErrors.Add(fmt.Errorf("parse css rule: %w", err))
+				}
 			}
-			return r, parseError
+			return r, allErrors.Error()
 		case RBraceKind:
-			parseError = errors.Join(parseError, fmt.Errorf("parse css rule: unexpected }"))
+			allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css rule: unexpected }")))
 			if nested {
 				p.stream.DiscardMark()
-				return nil, parseError
+				return nil, allErrors.Error()
 			} else {
 				p.stream.DiscardMark()
 				r.Prelude = append(r.Prelude, tok)
@@ -164,8 +168,9 @@ func (p *Parser) qualifiedRule(stop Kind, nested bool) (*Rule, error) {
 			var err error
 			r.Prelude, err = p.value(r.Prelude)
 			if err != nil {
-				// TODO(soon): Split apart err and wrap each error individually.
-				parseError = errors.Join(parseError, fmt.Errorf("parse css rule: %w", err))
+				for err := range multierror.All(err) {
+					allErrors.Add(fmt.Errorf("parse css rule: %w", err))
+				}
 			}
 		}
 	}
@@ -188,37 +193,37 @@ func (p *Parser) value(dst []Token) ([]Token, error) {
 		p.stream.DiscardMark()
 		dst = append(dst, tok)
 		if err != nil {
-			err = fmt.Errorf("parse css value: %w", err)
+			err = ErrorWithLocation("", tok.Start, fmt.Errorf("parse css value: %w", err))
 		}
 		return dst, err
 	}
 }
 
 func (p *Parser) valueList(stop Kind, nested bool) (dst []Token, err error) {
-	var parseError error
+	var allErrors multierror.Collector
 	for {
 		p.stream.Mark()
 		tok, err := p.stream.Next()
 		switch tok.Kind {
 		case EOFKind, stop:
 			p.stream.RestoreMark()
-			return dst, parseError
+			return dst, allErrors.Error()
 		case RBraceKind:
 			if nested {
 				p.stream.RestoreMark()
-				return dst, parseError
+				return dst, allErrors.Error()
 			} else {
 				p.stream.DiscardMark()
 				if err != nil {
-					parseError = errors.Join(parseError, fmt.Errorf("parse css value: %w", err))
+					allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css value: %w", err)))
 				}
-				parseError = errors.Join(parseError, fmt.Errorf("parse css value: unmatched }"))
+				allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css value: unmatched }")))
 			}
 		default:
 			p.stream.RestoreMark()
 			// Ignore err from Next call above, since p.value() will pick it up.
 			dst, err = p.value(dst)
-			parseError = errors.Join(parseError, err)
+			allErrors.Add(err)
 		}
 	}
 }
@@ -233,14 +238,14 @@ func (p *Parser) block(dst []Token) ([]Token, error) {
 	name, end, isBlock := blockKind(tok.Kind)
 	if !isBlock || tok.Kind == FunctionKind {
 		p.stream.RestoreMark()
-		return dst, fmt.Errorf("parse css block: expected (/[/{ (found %v)", tok)
+		return dst, ErrorWithLocation("", tok.Start, fmt.Errorf("parse css block: expected (/[/{ (found %v)", tok))
 	}
 	p.stream.DiscardMark()
 
+	var allErrors multierror.Collector
 	if err != nil {
-		err = fmt.Errorf("parse css %s-block: %w", name, err)
+		allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s-block: %w", name, err)))
 	}
-	parseError := err
 	dst = append(dst, tok)
 
 	for {
@@ -252,22 +257,23 @@ func (p *Parser) block(dst []Token) ([]Token, error) {
 			if err == io.EOF {
 				err = io.ErrUnexpectedEOF
 			}
-			parseError = errors.Join(parseError, fmt.Errorf("parse css %s-block: %w", name, err))
-			return dst, parseError
+			allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s-block: %w", name, err)))
+			return dst, allErrors.Error()
 		case end:
 			p.stream.DiscardMark()
 			dst = append(dst, tok)
 			if err != nil {
-				parseError = errors.Join(parseError, fmt.Errorf("parse css %s-block: %w", name, err))
+				allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s-block: %w", name, err)))
 			}
-			return dst, parseError
+			return dst, allErrors.Error()
 		default:
 			p.stream.RestoreMark()
 			var err error
 			dst, err = p.value(dst)
 			if err != nil {
-				// TODO(soon): Split apart err and wrap each error individually.
-				parseError = errors.Join(parseError, fmt.Errorf("parse css %s-block: %w", name, err))
+				for err := range multierror.All(err) {
+					allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s-block: %w", name, err)))
+				}
 			}
 		}
 	}
@@ -282,15 +288,15 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 	}
 	if tok.Kind != FunctionKind {
 		p.stream.RestoreMark()
-		return dst, fmt.Errorf("parse css function call: expected %v (found %v)", FunctionKind, tok)
+		return dst, ErrorWithLocation("", tok.Start, fmt.Errorf("parse css function call: expected %v (found %v)", FunctionKind, tok))
 	}
 	p.stream.DiscardMark()
 
 	name := tok.Value
+	var allErrors multierror.Collector
 	if err != nil {
-		err = fmt.Errorf("parse css %s call: %w", name, err)
+		allErrors.Add(fmt.Errorf("parse css %s call: %w", name, err))
 	}
-	parseError := err
 	dst = append(dst, tok)
 
 	for {
@@ -302,22 +308,23 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 			if err == io.EOF {
 				err = io.ErrUnexpectedEOF
 			}
-			parseError = errors.Join(parseError, fmt.Errorf("parse css %s call: %w", name, err))
-			return dst, parseError
+			allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s call: %w", name, err)))
+			return dst, allErrors.Error()
 		case RParenKind:
 			p.stream.DiscardMark()
 			dst = append(dst, tok)
 			if err != nil {
-				parseError = errors.Join(parseError, fmt.Errorf("parse css %s call: %w", name, err))
+				allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s call: %w", name, err)))
 			}
-			return dst, parseError
+			return dst, allErrors.Error()
 		default:
 			p.stream.RestoreMark()
 			var err error
 			dst, err = p.value(dst)
 			if err != nil {
-				// TODO(soon): Split apart err and wrap each error individually.
-				parseError = errors.Join(parseError, fmt.Errorf("parse css %s call: %w", name, err))
+				for err := range multierror.All(err) {
+					allErrors.Add(ErrorWithLocation("", tok.Start, fmt.Errorf("parse css %s call: %w", name, err)))
+				}
 			}
 		}
 	}
@@ -328,7 +335,7 @@ func (p *Parser) function(dst []Token) ([]Token, error) {
 // This requires arbitrary lookahead,
 // so this should only be run on a [*tokenSlice].
 func (p *Parser) blockPart() (BlockPart, error) {
-	var parseError error
+	var allErrors multierror.Collector
 	for {
 		p.stream.Mark()
 		tok, err := p.stream.Next()
@@ -336,19 +343,19 @@ func (p *Parser) blockPart() (BlockPart, error) {
 		case EOFKind:
 			p.stream.DiscardMark()
 			if err != io.EOF {
-				parseError = errors.Join(parseError, err)
+				allErrors.Add(err)
 			}
-			return BlockPart{}, parseError
+			return BlockPart{}, allErrors.Error()
 		case RBraceKind:
 			p.stream.RestoreMark()
-			return BlockPart{}, parseError
+			return BlockPart{}, allErrors.Error()
 		case WhitespaceKind, SemicolonKind:
 			p.stream.DiscardMark()
 		case AtKeywordKind:
 			p.stream.DiscardMark()
 			rule, err := p.atRule(tok.Value, tok.Start, true)
-			parseError = errors.Join(parseError, err)
-			return ToBlockPart(rule), parseError
+			allErrors.Add(err)
+			return ToBlockPart(rule), allErrors.Error()
 		case IdentKind:
 			// This could either be a declaration or a qualified rule.
 			// We need arbitrary lookahead to find
@@ -358,8 +365,8 @@ func (p *Parser) blockPart() (BlockPart, error) {
 				// Example: "font+"... is guaranteed to not be a property.
 				p.stream.RestoreMark()
 				if rule, err := p.qualifiedRule(SemicolonKind, true); rule != nil {
-					parseError = errors.Join(parseError, err)
-					return ToBlockPart(rule), parseError
+					allErrors.Add(err)
+					return ToBlockPart(rule), allErrors.Error()
 				}
 				continue
 			}
@@ -369,8 +376,8 @@ func (p *Parser) blockPart() (BlockPart, error) {
 				// Example: "--foo:hover {"..."}" is guaranteed to be a custom property.
 				p.stream.RestoreMark()
 				if decl, err := p.declaration(true); decl != nil {
-					parseError = errors.Join(parseError, err)
-					return ToBlockPart(decl), parseError
+					allErrors.Add(err)
+					return ToBlockPart(decl), allErrors.Error()
 				}
 				continue
 			}
@@ -382,16 +389,16 @@ func (p *Parser) blockPart() (BlockPart, error) {
 			p.stream.Mark()
 			if decl, err := p.declaration(true); decl != nil {
 				p.stream.DiscardMark()
-				parseError = errors.Join(parseError, err)
-				return ToBlockPart(decl), parseError
+				allErrors.Add(err)
+				return ToBlockPart(decl), allErrors.Error()
 			}
 			fallthrough
 		default:
 			p.stream.RestoreMark()
 			rule, err := p.qualifiedRule(SemicolonKind, true)
-			parseError = errors.Join(parseError, err)
+			allErrors.Add(err)
 			if rule != nil {
-				return ToBlockPart(rule), parseError
+				return ToBlockPart(rule), allErrors.Error()
 			}
 		}
 	}
@@ -408,10 +415,10 @@ func (p *Parser) declaration(nested bool) (*Declaration, error) {
 		p.stream.RestoreMark()
 		return nil, p.skipBadDeclaration(nested)
 	}
+	var allErrors multierror.Collector
 	if err != nil {
-		err = fmt.Errorf("parse css declaration: %w", err)
+		allErrors.Add(fmt.Errorf("parse css declaration: %w", err))
 	}
-	parseError := err
 
 	decl := &Declaration{
 		Name:      tok.Value,
@@ -423,14 +430,14 @@ func (p *Parser) declaration(nested bool) (*Declaration, error) {
 	p.stream.Mark()
 	tok, err = p.stream.Next()
 	if err != nil {
-		parseError = errors.Join(parseError, fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
+		allErrors.Add(fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
 	}
 	if tok.Kind != ColonKind {
 		p.stream.RestoreMark()
 		if err := p.skipBadDeclaration(nested); err != nil {
-			parseError = errors.Join(parseError, fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
+			allErrors.Add(fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
 		}
-		return nil, parseError
+		return nil, allErrors.Error()
 	}
 	p.stream.DiscardMark()
 	p.whitespace()
@@ -438,7 +445,7 @@ func (p *Parser) declaration(nested bool) (*Declaration, error) {
 	// Parse value.
 	decl.Value, err = p.valueList(SemicolonKind, nested)
 	if err != nil {
-		parseError = errors.Join(parseError, fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
+		allErrors.Add(fmt.Errorf("parse css %s declaration: %w", decl.Name, err))
 	}
 
 	// Check for important flag.
@@ -469,24 +476,24 @@ func (p *Parser) declaration(nested bool) (*Declaration, error) {
 				// Ignore.
 			case LBraceKind:
 				if hasNonWhitespace {
-					return nil, parseError
+					return nil, allErrors.Error()
 				}
 				hasNonWhitespace = true
 				hasBraceBlock = true
 			default:
 				hasNonWhitespace = true
 				if hasBraceBlock {
-					return nil, parseError
+					return nil, allErrors.Error()
 				}
 			}
 		}
 	}
 
-	return decl, parseError
+	return decl, allErrors.Error()
 }
 
 func (p *Parser) skipBadDeclaration(nested bool) error {
-	var parseError error
+	var allErrors multierror.Collector
 	for {
 		p.stream.Mark()
 		tok, err := p.stream.Next()
@@ -494,13 +501,13 @@ func (p *Parser) skipBadDeclaration(nested bool) error {
 		case EOFKind:
 			p.stream.DiscardMark()
 			if err != io.EOF {
-				parseError = errors.Join(parseError, err)
+				allErrors.Add(err)
 			}
-			return parseError
+			return allErrors.Error()
 		case SemicolonKind:
 			p.stream.DiscardMark()
-			parseError = errors.Join(parseError, err)
-			return parseError
+			allErrors.Add(err)
+			return allErrors.Error()
 		case RBraceKind:
 			if nested {
 				p.stream.RestoreMark()
@@ -511,7 +518,7 @@ func (p *Parser) skipBadDeclaration(nested bool) error {
 		default:
 			p.stream.RestoreMark()
 			if _, err := p.value(nil); err != nil {
-				parseError = errors.Join(parseError, err)
+				allErrors.Add(err)
 			}
 		}
 	}

@@ -25,6 +25,20 @@ type Rule struct {
 	Block      Value
 }
 
+// Start returns the [Location] of the first token in the rule.
+func (rule *Rule) Start() Location {
+	if rule.AtRule != "" {
+		return rule.AtLocation
+	}
+	if len(rule.Prelude) > 0 {
+		return rule.Prelude[0].Start
+	}
+	if len(rule.Block) > 0 {
+		return rule.Block[0].Start
+	}
+	return Location{}
+}
+
 // AtKeyword returns the rule's at-keyword token, if present.
 func (rule *Rule) AtKeyword() (Token, bool) {
 	if rule == nil || rule.AtRule == "" {

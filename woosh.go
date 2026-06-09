@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"zombiezen.com/go/woosh/internal/css"
+	"zombiezen.com/go/woosh/internal/multierror"
 )
 
 // Options holds the arguments to [Process].
@@ -27,7 +28,7 @@ func Process(dst io.Writer, opts *Options) error {
 	s := newState(opts)
 	for _, arg := range s.options.Entrypoints {
 		if err := s.importCSS(arg, s.layers[len(s.layers)-1]); err != nil {
-			return err
+			return reformatWithLocations(err)
 		}
 	}
 	valueOpts := &valueFunctionOptions{
@@ -58,14 +59,18 @@ func Process(dst io.Writer, opts *Options) error {
 	// Rewrite utility classes.
 	for _, layer := range s.layers {
 		for i := 0; i < len(layer.rules); i++ {
-			uc := s.classes[layer.rules[i]]
+			uc := s.classes[layer.rules[i].Rule]
 			if uc == nil {
 				continue
 			}
+			source := layer.rules[i].url
 			layer.rules = slices.Delete(layer.rules, i, i+1)
 			for _, className := range found {
 				for newRule := range uc.classRules(className, valueOpts) {
-					layer.rules = slices.Insert(layer.rules, i, newRule)
+					layer.rules = slices.Insert(layer.rules, i, fileRule{
+						Rule: newRule,
+						url:  source,
+					})
 					i++
 				}
 			}
@@ -107,14 +112,15 @@ func Process(dst io.Writer, opts *Options) error {
 		}
 
 		for _, rule := range layer.rules {
+			ruleToWrite := rule.Rule
 			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
-				rootRule := rewriteThemeRule(rule, usedVariableNames)
+				rootRule := rewriteThemeRule(rule.Rule, usedVariableNames)
 				if rootRule == nil {
 					continue
 				}
-				rule = rootRule
+				ruleToWrite = rootRule
 			}
-			if err := writeTokenSeq(w, rule.Tokens()); err != nil {
+			if err := writeTokenSeq(w, ruleToWrite.Tokens()); err != nil {
 				return err
 			}
 			if err := w.WriteToken(css.Token{Kind: css.WhitespaceKind}); err != nil {
@@ -198,10 +204,15 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 	defer rc.Close()
 
 	p := css.NewParser(css.NewScanner(bufio.NewReader(rc)))
+	var allErrors multierror.Collector
 	for {
 		rule, err := p.NextRule()
 		if err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("process %v: %v", u, err)
+			for err := range multierror.All(err) {
+				css.AddFileToError(u.String(), err)
+				allErrors.Add(err)
+			}
+			return allErrors.Error()
 		}
 		if rule == nil {
 			break
@@ -210,11 +221,13 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 		case css.EqualCaseInsensitive(rule.AtRule, "import"):
 			imp, err := parseImport(rule)
 			if err != nil {
-				return fmt.Errorf("process %v: %v", u, err)
+				allErrors.Add(css.ErrorWithLocation(u.String(), rule.Start(), err))
+				continue
 			}
 			importURL, err := url.Parse(imp.urlstr)
 			if err != nil {
-				return fmt.Errorf("process %v: parse @import: %v", u, err)
+				allErrors.Add(css.ErrorWithLocation(u.String(), rule.Start(), fmt.Errorf("parse @import: %v", err)))
+				continue
 			}
 			importURL = u.ResolveReference(importURL)
 			importLayer := l
@@ -222,14 +235,18 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 				importLayer = s.getOrCreateLayer(imp.layerName)
 			}
 			if err := s.importCSS(importURL, importLayer); err != nil {
-				return err
+				allErrors.Add(err)
+				continue
 			}
 		case css.EqualCaseInsensitive(rule.AtRule, "layer"):
 			if len(rule.Block) > 0 {
 				l := s.getOrCreateLayer(parseLayerName(rule.Prelude))
 				for part := range rule.BlockContents() {
 					if rule := part.Rule(); rule != nil {
-						l.rules = append(l.rules, rule)
+						l.rules = append(l.rules, fileRule{
+							Rule: rule,
+							url:  u,
+						})
 					}
 				}
 			} else {
@@ -240,18 +257,26 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 				}
 			}
 		case css.EqualCaseInsensitive(rule.AtRule, "utility"):
-			uc, err := newUtilityClass(rule)
+			fr := fileRule{
+				Rule: rule,
+				url:  u,
+			}
+			uc, err := newUtilityClass(fr)
 			if err != nil {
-				return err
+				allErrors.Add(err)
+				continue
 			}
 			s.classes[rule] = uc
-			l.rules = append(l.rules, rule)
+			l.rules = append(l.rules, fr)
 		default:
-			l.rules = append(l.rules, rule)
+			l.rules = append(l.rules, fileRule{
+				Rule: rule,
+				url:  u,
+			})
 		}
 	}
 
-	return nil
+	return allErrors.Error()
 }
 
 // themePropertyNames returns the property names that appear in @theme rules
@@ -349,7 +374,12 @@ func (s *state) getOrCreateLayer(name string) *layer {
 
 type layer struct {
 	name  string
-	rules []*css.Rule
+	rules []fileRule
+}
+
+type fileRule struct {
+	*css.Rule
+	url *url.URL
 }
 
 type cssImport struct {
@@ -416,6 +446,17 @@ func layerNameTokens(s string) iter.Seq[css.Token] {
 			}
 		}
 	}
+}
+
+func reformatWithLocations(err error) error {
+	var allErrors multierror.Collector
+	for err := range multierror.All(err) {
+		if file, loc, ok := css.ErrorLocation(err); ok && file != "" {
+			err = fmt.Errorf("%s:%d: %w", file, loc.Line, err)
+		}
+		allErrors.Add(err)
+	}
+	return allErrors.Error()
 }
 
 func writeTokenSeq(w *css.Writer, tokens iter.Seq[css.Token]) error {

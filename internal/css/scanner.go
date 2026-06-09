@@ -30,12 +30,12 @@ func NewScanner(r io.RuneReader) *Scanner {
 // [parse errors]: https://www.w3.org/TR/css-syntax-3/#parse-error
 func (s *Scanner) Next() (Token, error) {
 	if err := s.comments(); err != nil {
-		return Token{}, err
+		return Token{Start: s.r.location()}, err
 	}
 	start := s.r.location()
 	r, _, err := s.r.ReadRune()
 	if err != nil {
-		return Token{}, err
+		return Token{Start: s.r.location()}, err
 	}
 	switch {
 	case isWhitespace(r):
@@ -49,7 +49,7 @@ func (s *Scanner) Next() (Token, error) {
 			s.consumeIdent(tb)
 			value, err := tb.String()
 			if err != nil {
-				err = fmt.Errorf("parse identifier: %w", err)
+				err = ErrorWithLocation("", start, fmt.Errorf("parse identifier: %w", err))
 			}
 			return Token{
 				Kind:  HashKind,
@@ -118,7 +118,7 @@ func (s *Scanner) Next() (Token, error) {
 			s.consumeIdent(tb)
 			value, err := tb.String()
 			if err != nil {
-				err = fmt.Errorf("parse at-keyword: %w", err)
+				err = ErrorWithLocation("", start, fmt.Errorf("parse at-keyword: %w", err))
 			}
 			return Token{
 				Kind:  AtKeywordKind,
@@ -166,7 +166,7 @@ func (s *Scanner) ident() (Token, error) {
 		s.r.ReadRune()
 		value, err := tb.String()
 		if err != nil {
-			err = fmt.Errorf("parse function: %w", err)
+			err = ErrorWithLocation("", start, fmt.Errorf("parse function: %w", err))
 		} else if EqualCaseInsensitive(value, "url") {
 			return s.url(tb, start)
 		}
@@ -179,7 +179,7 @@ func (s *Scanner) ident() (Token, error) {
 
 	value, err := tb.String()
 	if err != nil {
-		err = fmt.Errorf("parse identifier: %w", err)
+		err = ErrorWithLocation("", start, fmt.Errorf("parse identifier: %w", err))
 	}
 	return Token{
 		Kind:  IdentKind,
@@ -200,7 +200,7 @@ func (s *Scanner) url(tb *tokenBuilder, start Location) (Token, error) {
 		len(next) >= 2 && isWhitespace(next[0]) && (next[1] == '"' || next[1] == '\'') {
 		value, err := tb.String()
 		if err != nil {
-			err = fmt.Errorf("parse function: %w", err)
+			err = ErrorWithLocation("", start, fmt.Errorf("parse function: %w", err))
 		}
 		return Token{
 			Kind:  FunctionKind,
@@ -217,7 +217,7 @@ urlChars:
 	for {
 		r, _, err := s.r.ReadRune()
 		if err != nil {
-			err = fmt.Errorf("parse url: %w", err)
+			err = ErrorWithLocation("", start, fmt.Errorf("parse url: %w", err))
 			value, _ := tb.String()
 			return Token{
 				Kind:  URLKind,
@@ -229,7 +229,7 @@ urlChars:
 		case r == ')':
 			value, err := tb.String()
 			if err != nil {
-				err = fmt.Errorf("parse url: %w", err)
+				err = ErrorWithLocation("", start, fmt.Errorf("parse url: %w", err))
 			}
 			return Token{
 				Kind:  URLKind,
@@ -241,7 +241,7 @@ urlChars:
 			r, _, err := s.r.ReadRune()
 			if err != nil || r == ')' {
 				value, valueError := tb.String()
-				err = fmt.Errorf("parse url: %w", cmp.Or(err, valueError))
+				err = ErrorWithLocation("", start, fmt.Errorf("parse url: %w", cmp.Or(err, valueError)))
 				return Token{
 					Kind:  URLKind,
 					Value: value,
@@ -251,13 +251,13 @@ urlChars:
 			break urlChars
 		case r == '"' || r == '\'' || r == '(' || isNonPrintable(r):
 			tb.WriteRune(r)
-			parseError = fmt.Errorf("parse url: expected url character (found %q)", r)
+			parseError = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse url: expected url character (found %q)", r))
 			break urlChars
 		case r == '\\':
 			s.r.UnreadRune()
 			r, err := s.consumeEscapedCodePoint()
 			if err != nil {
-				parseError = fmt.Errorf("parse url: %w", err)
+				parseError = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse url: %w", err))
 				break urlChars
 			}
 			tb.WriteRune(r)
@@ -320,7 +320,7 @@ func (s *Scanner) string(start Location, end rune) (Token, error) {
 	for {
 		r, _, err := s.r.ReadRune()
 		if err != nil {
-			err = fmt.Errorf("parse string: %w", err)
+			err = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse string: %w", err))
 			value, _ := tb.String()
 			return Token{
 				Kind:  StringKind,
@@ -332,7 +332,7 @@ func (s *Scanner) string(start Location, end rune) (Token, error) {
 		case end:
 			value, err := tb.String()
 			if err != nil {
-				err = fmt.Errorf("parse string: %w", err)
+				err = ErrorWithLocation("", start, fmt.Errorf("parse string: %w", err))
 			}
 			return Token{
 				Kind:  StringKind,
@@ -341,7 +341,7 @@ func (s *Scanner) string(start Location, end rune) (Token, error) {
 			}, err
 		case '\n':
 			s.r.UnreadRune()
-			err = fmt.Errorf("parse string: expected %c (found newline)", end)
+			err = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse string: expected %c (found newline)", end))
 			value, _ := tb.String()
 			return Token{
 				Kind:  BadStringKind,
@@ -358,7 +358,7 @@ func (s *Scanner) string(start Location, end rune) (Token, error) {
 			}
 			r, err := s.consumeEscapedCodePoint()
 			if err != nil {
-				err = fmt.Errorf("parse string: %w", err)
+				err = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse string: %w", err))
 				value, _ := tb.String()
 				return Token{
 					Kind:  StringKind,
@@ -389,7 +389,7 @@ func (s *Scanner) numeric() (Token, error) {
 		s.consumeIdent(tb)
 		value, err := tb.String()
 		if err != nil {
-			err = fmt.Errorf("parse dimension: %w", err)
+			err = ErrorWithLocation("", start, fmt.Errorf("parse dimension: %w", err))
 		}
 		return Token{
 			Kind:  DimensionKind,
@@ -402,7 +402,7 @@ func (s *Scanner) numeric() (Token, error) {
 		s.r.ReadRune()
 		value, err := tb.String()
 		if err != nil {
-			err = fmt.Errorf("parse percentage: %w", err)
+			err = ErrorWithLocation("", start, fmt.Errorf("parse percentage: %w", err))
 		}
 		return Token{
 			Kind:  PercentageKind,
@@ -413,7 +413,7 @@ func (s *Scanner) numeric() (Token, error) {
 
 	value, err := tb.String()
 	if err != nil {
-		err = fmt.Errorf("parse number: %w", err)
+		err = ErrorWithLocation("", start, fmt.Errorf("parse number: %w", err))
 	}
 	return Token{
 		Kind:  NumberKind,
@@ -426,7 +426,7 @@ func (s *Scanner) consumeNumber(tb *tokenBuilder) error {
 	// Consume sign.
 	r, _, err := s.r.ReadRune()
 	if err != nil {
-		return fmt.Errorf("parse number: %w", err)
+		return ErrorWithLocation("", s.r.location(), fmt.Errorf("parse number: %w", err))
 	}
 	if r == '+' || r == '-' {
 		tb.WriteRune(r)
@@ -435,7 +435,7 @@ func (s *Scanner) consumeNumber(tb *tokenBuilder) error {
 			if err == io.EOF {
 				err = io.ErrUnexpectedEOF
 			}
-			return fmt.Errorf("parse number: %w", err)
+			return ErrorWithLocation("", s.r.location(), fmt.Errorf("parse number: %w", err))
 		}
 	}
 
@@ -476,11 +476,11 @@ func (s *Scanner) consumeNumber(tb *tokenBuilder) error {
 		next, err := s.r.peek(1)
 		switch err {
 		case nil:
-			err = fmt.Errorf("expected digit or '.' (got %q)", next[0])
+			err = ErrorWithLocation("", s.r.location(), fmt.Errorf("expected digit or '.' (got %q)", next[0]))
 		case io.EOF:
 			err = io.ErrUnexpectedEOF
 		}
-		return fmt.Errorf("parse number: %w", err)
+		return ErrorWithLocation("", s.r.location(), fmt.Errorf("parse number: %w", err))
 	}
 
 	// Optional exponent.
@@ -527,16 +527,19 @@ func (s *Scanner) consumeEscapedCodePoint() (rune, error) {
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF
 		}
-		return unicode.ReplacementChar, fmt.Errorf("parse escaped code point: %w", err)
+		err = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse escaped code point: %w", err))
+		return unicode.ReplacementChar, err
 	}
 	if next[0] != '\\' {
-		return unicode.ReplacementChar, fmt.Errorf("parse escaped code point: expected '\\' (found %q)", next[0])
+		err := ErrorWithLocation("", s.r.location(), fmt.Errorf("parse escaped code point: expected '\\' (found %q)", next[0]))
+		return unicode.ReplacementChar, err
 	}
 	r := next[1]
 
 	if !startsWithValidEscape(next) {
 		s.r.ReadRune() // Consume backslash.
-		return unicode.ReplacementChar, fmt.Errorf("parse escaped code point: found %q after '\\'", r)
+		err := ErrorWithLocation("", s.r.location(), fmt.Errorf("parse escaped code point: found %q after '\\'", r))
+		return unicode.ReplacementChar, err
 	}
 	// next no longer valid beyond here.
 	s.r.ReadRune()
@@ -583,7 +586,8 @@ func (s *Scanner) comments() error {
 				if err == io.EOF {
 					err = io.ErrUnexpectedEOF
 				}
-				return fmt.Errorf("parse css comment: %w", err)
+				err = ErrorWithLocation("", s.r.location(), fmt.Errorf("parse css comment: %w", err))
+				return err
 			}
 		}
 	}
