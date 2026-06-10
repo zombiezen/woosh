@@ -245,29 +245,6 @@ func (uc *utilityClass) writeRegexp(sb *strings.Builder, opts *valueFunctionOpti
 	}
 }
 
-func collectRegexp(seq iter.Seq[*utilityClass], opts *valueFunctionOptions) (*regexp.Regexp, error) {
-	expr := new(strings.Builder)
-	expr.WriteString(`(?:^|[ \t\r\n"',<>])(`)
-	first := true
-	for uc := range seq {
-		if first {
-			first = false
-		} else {
-			expr.WriteString(`|`)
-		}
-		expr.WriteString(`(?:`)
-		uc.writeRegexp(expr, opts)
-		expr.WriteString(`)`)
-	}
-	expr.WriteString(`)(?:$|[ \t\r\n"',<>])`)
-
-	re, err := regexp.Compile(expr.String())
-	if err != nil {
-		return nil, fmt.Errorf("compile class detection pattern: %v", err)
-	}
-	return re, nil
-}
-
 func collapseTokenString(tokens []css.Token) string {
 	buf := new(bytes.Buffer)
 	w := css.NewWriter(buf)

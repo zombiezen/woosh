@@ -13,6 +13,7 @@ import (
 	"iter"
 	"maps"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -148,6 +149,29 @@ func Process(dst io.Writer, opts *Options) error {
 	}
 
 	return nil
+}
+
+func collectRegexp(seq iter.Seq[*utilityClass], opts *valueFunctionOptions) (*regexp.Regexp, error) {
+	expr := new(strings.Builder)
+	expr.WriteString(`(?:^|[ \t\r\n"',<>])(`)
+	first := true
+	for uc := range seq {
+		if first {
+			first = false
+		} else {
+			expr.WriteString(`|`)
+		}
+		expr.WriteString(`(?:`)
+		uc.writeRegexp(expr, opts)
+		expr.WriteString(`)`)
+	}
+	expr.WriteString(`)(?:$|[ \t\r\n"',<>])`)
+
+	re, err := regexp.Compile(expr.String())
+	if err != nil {
+		return nil, fmt.Errorf("compile class detection pattern: %v", err)
+	}
+	return re, nil
 }
 
 func rewriteThemeRule(rule *css.Rule, usedVars map[string]struct{}) *css.Rule {
