@@ -6,9 +6,7 @@ package woosh
 import (
 	"bytes"
 	"fmt"
-	"iter"
 	"regexp"
-	"slices"
 	"strings"
 
 	"zombiezen.com/go/woosh/internal/css"
@@ -20,7 +18,7 @@ type utilityClass struct {
 	className string
 	valueArgs valueFunctionArguments
 	usesValue bool
-	rules     []*css.Rule
+	block     css.Value
 }
 
 func newUtilityClass(rule fileRule) (*utilityClass, error) {
@@ -43,61 +41,15 @@ func newUtilityClass(rule fileRule) (*utilityClass, error) {
 	uc := &utilityClass{
 		className: prelude[0].Value,
 		usesValue: len(prelude) > 1,
-	}
-	var implicitRule *css.Rule
-	for part := range rule.BlockContents() {
-		switch {
-		case part.Rule() != nil:
-			if implicitRule != nil {
-				return nil, css.ErrorWithLocation(rule.url.String(), part.Rule().Start(), fmt.Errorf("parse @utility %s: can't mix declarations with rules", uc.name()))
-			}
-			if part.Rule().AtRule != "" {
-				return nil, css.ErrorWithLocation(rule.url.String(), part.Rule().Start(), fmt.Errorf("parse @utility %s: can't nest @%s", uc.name(), part.Rule().AtRule))
-			}
-			ruleCopy := new(*part.Rule())
-			ruleCopy.Prelude = slices.Clone(ruleCopy.Prelude)
-			ruleCopy.Block = slices.Clone(ruleCopy.Block)
-			uc.rules = append(uc.rules, ruleCopy)
-		case part.Declaration() != nil:
-			if len(uc.rules) > 0 {
-				return nil, css.ErrorWithLocation(rule.url.String(), part.Declaration().NameStart, fmt.Errorf("parse @utility %s: can't mix declarations with rules", uc.name()))
-			}
-			if implicitRule == nil {
-				implicitRule = &css.Rule{
-					Prelude: []css.Token{
-						{Kind: css.DelimKind, Value: "&"},
-						{Kind: css.WhitespaceKind},
-					},
-					Block: css.Value{
-						{Kind: css.LBraceKind},
-						{Kind: css.WhitespaceKind},
-					},
-				}
-			}
-			implicitRule.Block = slices.AppendSeq(implicitRule.Block, part.Declaration().Tokens())
-		default:
-			return nil, css.ErrorWithLocation(rule.url.String(), rule.Start(), fmt.Errorf("parse @utility %s: unsupported block part", uc.name()))
-		}
-	}
-	if implicitRule != nil {
-		implicitRule.Block = append(implicitRule.Block,
-			css.Token{Kind: css.WhitespaceKind},
-			css.Token{Kind: css.RBraceKind},
-		)
-		uc.rules = append(uc.rules, implicitRule)
-	}
-	if len(uc.rules) == 0 {
-		return nil, css.ErrorWithLocation(rule.url.String(), rule.Start(), fmt.Errorf("parse @utility %s: empty block", uc.name()))
+		block:     rule.Block,
 	}
 
 	if uc.usesValue {
 		var allErrors multierror.Collector
 		source := rule.url
-		for _, rule := range uc.rules {
-			if err := uc.valueArgs.collect(rule.Block); err != nil {
-				css.AddFileToError(source.String(), err)
-				allErrors.Add(err)
-			}
+		if err := uc.valueArgs.collect(uc.block); err != nil {
+			css.AddFileToError(source.String(), err)
+			allErrors.Add(err)
 		}
 		if err := allErrors.Error(); err != nil {
 			return nil, err
@@ -107,15 +59,7 @@ func newUtilityClass(rule fileRule) (*utilityClass, error) {
 	return uc, nil
 }
 
-func (uc *utilityClass) name() string {
-	name := css.Token{Kind: css.IdentKind, Value: uc.className}.String()
-	if uc.usesValue {
-		name += "*"
-	}
-	return name
-}
-
-func (uc *utilityClass) classRules(className string, opts *valueFunctionOptions) iter.Seq[*css.Rule] {
+func (uc *utilityClass) expand(className string, opts *valueFunctionOptions) *css.Rule {
 	var classValue string
 	switch {
 	case !uc.usesValue && className == uc.className:
@@ -125,26 +69,13 @@ func (uc *utilityClass) classRules(className string, opts *valueFunctionOptions)
 		return nil
 	}
 
-	return func(yield func(*css.Rule) bool) {
-		for _, rule := range uc.rules {
-			newRule := &css.Rule{
-				Prelude: make([]css.Token, 0, len(rule.Prelude)),
-				Block:   replaceValueFunctionInBlock(nil, rule.Block, classValue, opts),
-			}
-			for _, tok := range rule.Prelude {
-				if tok.IsDelim('&') {
-					newRule.Prelude = append(newRule.Prelude,
-						css.Token{Kind: css.DelimKind, Value: "."},
-						css.Token{Kind: css.IdentKind, Value: className},
-					)
-				} else {
-					newRule.Prelude = append(newRule.Prelude, tok)
-				}
-			}
-			if !yield(newRule) {
-				return
-			}
-		}
+	return &css.Rule{
+		Prelude: []css.Token{
+			{Kind: css.DelimKind, Value: "."},
+			{Kind: css.IdentKind, Value: className},
+			{Kind: css.WhitespaceKind},
+		},
+		Block: replaceValueFunctionInBlock(nil, uc.block, classValue, opts),
 	}
 }
 

@@ -26,15 +26,14 @@ func replaceValueFunctionInBlock(dst css.Value, block css.Value, value string, o
 	}
 	dst = slices.Grow(dst, len(block))
 	dst = append(dst, block[0])
-	if len(blockContents) > 0 && blockContents[0].Kind == css.WhitespaceKind {
-		dst = append(dst, css.Token{Kind: css.WhitespaceKind})
-	}
+	dst = append(dst, css.Token{Kind: css.WhitespaceKind})
 	for part := range css.SplitBlockContents(blockContents) {
 		if decl := part.Declaration(); decl != nil {
 			if newValue, ok := replaceValueFunction(decl.Value, value, opts); ok {
 				newDecl := *decl
 				newDecl.Value = newValue
 				dst = slices.AppendSeq(dst, newDecl.Tokens())
+				dst = append(dst, css.Token{Kind: css.WhitespaceKind})
 			}
 		} else if rule := part.Rule(); rule != nil {
 			atKeyword, isAtRule := rule.AtKeyword()
@@ -46,10 +45,8 @@ func replaceValueFunctionInBlock(dst css.Value, block css.Value, value string, o
 			if len(rule.Block) == 0 && isAtRule {
 				dst = append(dst, css.Token{Kind: css.SemicolonKind})
 			}
+			dst = append(dst, css.Token{Kind: css.WhitespaceKind})
 		}
-	}
-	if len(blockContents) > 0 && blockContents[len(blockContents)-1].Kind == css.WhitespaceKind {
-		dst = append(dst, css.Token{Kind: css.WhitespaceKind})
 	}
 	dst = append(dst, block[len(block)-1])
 	return dst

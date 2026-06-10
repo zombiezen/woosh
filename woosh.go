@@ -79,7 +79,7 @@ func Process(dst io.Writer, opts *Options) error {
 			source := layer.rules[i].url
 			layer.rules = slices.Delete(layer.rules, i, i+1)
 			for _, className := range found {
-				for newRule := range uc.classRules(className, valueOpts) {
+				if newRule := uc.expand(className, valueOpts); newRule != nil {
 					layer.rules = slices.Insert(layer.rules, i, fileRule{
 						Rule: newRule,
 						url:  source,
