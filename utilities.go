@@ -59,12 +59,12 @@ func newUtilityClass(rule fileRule) (*utilityClass, error) {
 	return uc, nil
 }
 
-func (uc *utilityClass) expand(className string, opts *valueFunctionOptions) *css.Rule {
+func (uc *utilityClass) expand(className string, variantPrefixLength int, opts *valueFunctionOptions) *css.Rule {
 	var classValue string
-	switch {
-	case !uc.usesValue && className == uc.className:
-	case uc.usesValue || strings.HasPrefix(className, uc.className):
-		classValue = className[len(uc.className):]
+	switch suffix := className[variantPrefixLength:]; {
+	case !uc.usesValue && suffix == uc.className:
+	case uc.usesValue || strings.HasPrefix(suffix, uc.className):
+		classValue = suffix[len(uc.className):]
 	default:
 		return nil
 	}

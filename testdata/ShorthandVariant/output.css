@@ -1,0 +1,5 @@
+.theme-midnight\:bg-black {
+	&:where([data-theme="midnight"] *) {
+		background-color: black;
+	}
+}

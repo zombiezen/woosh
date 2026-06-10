@@ -1,0 +1,7 @@
+.any-hover\:bg-black {
+	@media (any-hover: hover) {
+		&:hover {
+			background-color: black;
+		}
+	}
+}

@@ -1,0 +1,9 @@
+.dark\:any-hover\:bg-black {
+	@media (prefers-color-scheme: dark) {
+		@media (any-hover: hover) {
+			&:hover {
+				background-color: black;
+			}
+		}
+	}
+}

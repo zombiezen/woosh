@@ -42,7 +42,7 @@ func Process(dst io.Writer, opts *Options) error {
 
 	foundMap := make(map[string]struct{})
 	if len(s.classes) > 0 {
-		re, err := collectRegexp(maps.Values(s.classes), valueOpts)
+		re, err := collectRegexp(maps.Values(s.classes), maps.Values(s.variants), valueOpts)
 		if err != nil {
 			return err
 		}
@@ -78,8 +78,11 @@ func Process(dst io.Writer, opts *Options) error {
 			}
 			source := layer.rules[i].url
 			layer.rules = slices.Delete(layer.rules, i, i+1)
-			for _, className := range found {
-				if newRule := uc.expand(className, valueOpts); newRule != nil {
+			for _, fullClassName := range found {
+				variants, className := s.trimVariants(fullClassName)
+				variantPrefixLength := len(fullClassName) - len(className)
+				if newRule := uc.expand(fullClassName, variantPrefixLength, valueOpts); newRule != nil {
+					injectVariants(variants, newRule)
 					layer.rules = slices.Insert(layer.rules, i, fileRule{
 						Rule: newRule,
 						url:  source,
@@ -159,11 +162,26 @@ func Process(dst io.Writer, opts *Options) error {
 	return nil
 }
 
-func collectRegexp(seq iter.Seq[*utilityClass], opts *valueFunctionOptions) (*regexp.Regexp, error) {
+func collectRegexp(classes iter.Seq[*utilityClass], variants iter.Seq[*variant], opts *valueFunctionOptions) (*regexp.Regexp, error) {
 	expr := new(strings.Builder)
 	expr.WriteString(`(?s)^(?:.*?[ \t\r\n"',<>])?(`)
+
 	first := true
-	for uc := range seq {
+	for v := range variants {
+		if first {
+			expr.WriteString(`(?:(?:`)
+			first = false
+		} else {
+			expr.WriteString(`|`)
+		}
+		expr.WriteString(regexp.QuoteMeta(v.name))
+	}
+	if !first {
+		expr.WriteString(`):)*`)
+	}
+
+	first = true
+	for uc := range classes {
 		if first {
 			first = false
 		} else {
@@ -173,6 +191,7 @@ func collectRegexp(seq iter.Seq[*utilityClass], opts *valueFunctionOptions) (*re
 		uc.writeRegexp(expr, opts)
 		expr.WriteString(`)`)
 	}
+
 	expr.WriteString(`)(?:$|[ \t\r\n"',<>])`)
 
 	re, err := regexp.Compile(expr.String())
@@ -213,15 +232,17 @@ func rewriteThemeRule(rule *css.Rule, usedVars map[string]struct{}) *css.Rule {
 }
 
 type state struct {
-	layers  []*layer
-	classes map[*css.Rule]*utilityClass
-	options Options
+	layers   []*layer
+	classes  map[*css.Rule]*utilityClass
+	variants map[string]*variant
+	options  Options
 }
 
 func newState(opts *Options) *state {
 	s := &state{
-		layers:  []*layer{{}},
-		classes: make(map[*css.Rule]*utilityClass),
+		layers:   []*layer{{}},
+		classes:  make(map[*css.Rule]*utilityClass),
+		variants: make(map[string]*variant),
 	}
 	if opts != nil {
 		s.options = *opts
@@ -304,6 +325,16 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 			}
 			s.classes[rule] = uc
 			l.rules = append(l.rules, fr)
+		case css.EqualCaseInsensitive(rule.AtRule, "custom-variant"):
+			v, err := newVariant(fileRule{
+				Rule: rule,
+				url:  u,
+			})
+			if err != nil {
+				allErrors.Add(err)
+				continue
+			}
+			s.variants[v.name] = v
 		default:
 			l.rules = append(l.rules, fileRule{
 				Rule: rule,
@@ -406,6 +437,27 @@ func (s *state) getOrCreateLayer(name string) *layer {
 	importLayer := &layer{name: name}
 	s.layers = slices.Insert(s.layers, len(s.layers)-1, importLayer)
 	return importLayer
+}
+
+func (s *state) trimVariants(className string) (variants []*variant, utility string) {
+	sepCount := strings.Count(className, ":")
+	if sepCount == 0 {
+		return nil, className
+	}
+
+	variants = make([]*variant, 0, sepCount)
+	for {
+		vname, tail, hasSep := strings.Cut(className, ":")
+		if !hasSep {
+			return variants, className
+		}
+		v := s.variants[vname]
+		if v == nil {
+			return variants, className
+		}
+		variants = append(variants, v)
+		className = tail
+	}
 }
 
 type layer struct {

@@ -1,0 +1,10 @@
+@custom-variant any-hover {
+	@media (any-hover: hover) {
+		&:hover {
+			@slot;
+		}
+	}
+}
+@utility bg-black {
+	background-color: black;
+}

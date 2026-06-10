@@ -247,3 +247,22 @@ func (part BlockPart) Rule() *Rule {
 	r, _ := part.x.(*Rule)
 	return r
 }
+
+// FirstToken returns the first [Token] of the [BlockPart].
+func (part BlockPart) FirstToken() (_ Token, ok bool) {
+	switch x := part.x.(type) {
+	case *Rule:
+		nextToken, stop := iter.Pull(x.Tokens())
+		tok, ok := nextToken()
+		stop()
+		return tok, ok
+	case *Declaration:
+		return Token{
+			Kind:  IdentKind,
+			Value: x.Name,
+			Start: x.NameStart,
+		}, true
+	default:
+		return Token{}, false
+	}
+}
