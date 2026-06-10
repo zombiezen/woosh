@@ -53,8 +53,16 @@ func Process(dst io.Writer, opts *Options) error {
 			if err != nil {
 				return fmt.Errorf("read source: %v", err)
 			}
-			for _, match := range re.FindAllSubmatch(data, -1) {
-				foundMap[string(match[1])] = struct{}{}
+			for {
+				match := re.FindSubmatchIndex(data)
+				if len(match) < 4 {
+					break
+				}
+				start := match[2]
+				end := match[3]
+				nextSearch := match[1]
+				foundMap[string(data[start:end])] = struct{}{}
+				data = data[nextSearch:]
 			}
 		}
 	}
@@ -153,7 +161,7 @@ func Process(dst io.Writer, opts *Options) error {
 
 func collectRegexp(seq iter.Seq[*utilityClass], opts *valueFunctionOptions) (*regexp.Regexp, error) {
 	expr := new(strings.Builder)
-	expr.WriteString(`(?:^|[ \t\r\n"',<>])(`)
+	expr.WriteString(`(?s)^(?:.*?[ \t\r\n"',<>])?(`)
 	first := true
 	for uc := range seq {
 		if first {
