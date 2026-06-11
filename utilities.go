@@ -69,13 +69,17 @@ func (uc *utilityClass) expand(className string, variantPrefixLength int, opts *
 		return nil
 	}
 
+	block := replaceValueFunctionInBlock(nil, uc.block, classValue, opts)
+	if contents, _ := block.BlockContents(); len(css.TrimWhitespace(contents)) == 0 {
+		return nil
+	}
 	return &css.Rule{
 		Prelude: []css.Token{
 			{Kind: css.DelimKind, Value: "."},
 			{Kind: css.IdentKind, Value: className},
 			{Kind: css.WhitespaceKind},
 		},
-		Block: replaceValueFunctionInBlock(nil, uc.block, classValue, opts),
+		Block: block,
 	}
 }
 

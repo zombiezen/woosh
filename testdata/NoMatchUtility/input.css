@@ -1,0 +1,9 @@
+@utility float-start {
+	float: inline-start;
+}
+@utility float-end {
+	float: inline-end;
+}
+@utility float-* {
+	float: --value("right", "left", "none");
+}
