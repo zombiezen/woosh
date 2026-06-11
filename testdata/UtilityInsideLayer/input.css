@@ -1,0 +1,7 @@
+@layer theme, base, components, utilities;
+
+@layer utilities {
+  @utility text-blue {
+		color: blue;
+  }
+}

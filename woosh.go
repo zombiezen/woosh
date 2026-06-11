@@ -274,36 +274,15 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 		if rule == nil {
 			break
 		}
-		switch {
-		case css.EqualCaseInsensitive(rule.AtRule, "import"):
-			imp, err := parseImport(rule)
-			if err != nil {
-				allErrors.Add(css.ErrorWithLocation(u.String(), rule.Start(), err))
-				continue
-			}
-			importURL, err := url.Parse(imp.urlstr)
-			if err != nil {
-				allErrors.Add(css.ErrorWithLocation(u.String(), rule.Start(), fmt.Errorf("parse @import: %v", err)))
-				continue
-			}
-			importURL = u.ResolveReference(importURL)
-			importLayer := l
-			if imp.hasLayer {
-				importLayer = s.getOrCreateLayer(imp.layerName)
-			}
-			if err := s.importCSS(importURL, importLayer); err != nil {
-				allErrors.Add(err)
-				continue
-			}
-		case css.EqualCaseInsensitive(rule.AtRule, "layer"):
+		if css.EqualCaseInsensitive(rule.AtRule, "layer") {
 			if len(rule.Block) > 0 {
 				l := s.getOrCreateLayer(parseLayerName(rule.Prelude))
 				for part := range rule.BlockContents() {
 					if rule := part.Rule(); rule != nil {
-						l.rules = append(l.rules, fileRule{
+						allErrors.Add(s.process(l, fileRule{
 							Rule: rule,
 							url:  u,
-						})
+						}))
 					}
 				}
 			} else {
@@ -313,37 +292,53 @@ func (s *state) importCSS(u *url.URL, l *layer) error {
 					}
 				}
 			}
-		case css.EqualCaseInsensitive(rule.AtRule, "utility"):
-			fr := fileRule{
+		} else {
+			allErrors.Add(s.process(l, fileRule{
 				Rule: rule,
 				url:  u,
-			}
-			uc, err := newUtilityClass(fr)
-			if err != nil {
-				allErrors.Add(err)
-				continue
-			}
-			s.classes[rule] = uc
-			l.rules = append(l.rules, fr)
-		case css.EqualCaseInsensitive(rule.AtRule, "custom-variant"):
-			v, err := newVariant(fileRule{
-				Rule: rule,
-				url:  u,
-			})
-			if err != nil {
-				allErrors.Add(err)
-				continue
-			}
-			s.variants[v.name] = v
-		default:
-			l.rules = append(l.rules, fileRule{
-				Rule: rule,
-				url:  u,
-			})
+			}))
 		}
 	}
 
 	return allErrors.Error()
+}
+
+func (s *state) process(l *layer, rule fileRule) error {
+	switch {
+	case css.EqualCaseInsensitive(rule.AtRule, "import"):
+		imp, err := parseImport(rule.Rule)
+		if err != nil {
+			return css.ErrorWithLocation(rule.url.String(), rule.Start(), err)
+		}
+		importURL, err := url.Parse(imp.urlstr)
+		if err != nil {
+			return css.ErrorWithLocation(rule.url.String(), rule.Start(), fmt.Errorf("parse @import: %v", err))
+		}
+		importURL = rule.url.ResolveReference(importURL)
+		importLayer := l
+		if imp.hasLayer {
+			importLayer = s.getOrCreateLayer(imp.layerName)
+		}
+		if err := s.importCSS(importURL, importLayer); err != nil {
+			return err
+		}
+	case css.EqualCaseInsensitive(rule.AtRule, "utility"):
+		uc, err := newUtilityClass(rule)
+		if err != nil {
+			return err
+		}
+		s.classes[rule.Rule] = uc
+		l.rules = append(l.rules, rule)
+	case css.EqualCaseInsensitive(rule.AtRule, "custom-variant"):
+		v, err := newVariant(rule)
+		if err != nil {
+			return err
+		}
+		s.variants[v.name] = v
+	default:
+		l.rules = append(l.rules, rule)
+	}
+	return nil
 }
 
 // themePropertyNames returns the property names that appear in @theme rules

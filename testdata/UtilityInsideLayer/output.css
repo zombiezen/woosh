@@ -1,0 +1,12 @@
+@layer theme {
+}
+@layer base {
+}
+@layer components {
+}
+@layer utilities {
+  .text-blue {
+		color: blue;
+  }
+}
+
