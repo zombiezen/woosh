@@ -1,0 +1,6 @@
+@utility z-* {
+	z-index: --value(integer);
+}
+@utility hidden {
+	visibility: hidden;
+}

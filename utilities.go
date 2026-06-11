@@ -63,7 +63,7 @@ func (uc *utilityClass) expand(className string, variantPrefixLength int, opts *
 	var classValue string
 	switch suffix := className[variantPrefixLength:]; {
 	case !uc.usesValue && suffix == uc.className:
-	case uc.usesValue || strings.HasPrefix(suffix, uc.className):
+	case uc.usesValue && strings.HasPrefix(suffix, uc.className):
 		classValue = suffix[len(uc.className):]
 	default:
 		return nil
