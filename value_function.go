@@ -79,6 +79,7 @@ func replaceValueFunction(tokens []css.Token, value string, opts *valueFunctionO
 		}
 		if !replaced {
 			tokens = slices.Clone(tokens)
+			replaced = true
 		}
 		tokens = slices.Replace(tokens, i, i+n, replacement...)
 		i = i + len(replacement)
