@@ -1,0 +1,4 @@
+@utility mx-* {
+	margin-inline: calc(var(--spacing) * --value(number));
+	margin-inline: --value([length], "auto");
+}
