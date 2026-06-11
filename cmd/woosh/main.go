@@ -4,10 +4,14 @@
 package main
 
 import (
+	"errors"
 	"io"
+	"iter"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/alecthomas/kong"
 	"zombiezen.com/go/woosh"
@@ -44,15 +48,7 @@ func (c *command) Run() error {
 
 	err := woosh.Process(outFile, &woosh.Options{
 		Entrypoints: entrypoints,
-		Sources: func(yield func(io.ReadCloser) bool) {
-			for _, src := range c.Sources {
-				if f, err := os.Open(src); err == nil {
-					if !yield(f) {
-						return
-					}
-				}
-			}
-		},
+		Sources:     sources(slices.Values(c.Sources)),
 	})
 	if err != nil {
 		outFile.Close()
@@ -64,6 +60,38 @@ func (c *command) Run() error {
 	}
 
 	return nil
+}
+
+func sources(roots iter.Seq[string]) iter.Seq[io.ReadCloser] {
+	return func(yield func(io.ReadCloser) bool) {
+		done := errors.New("yield returned false")
+		for root := range roots {
+			err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return nil
+				}
+				name := entry.Name()
+				if path != root && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
+					if entry.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if entry.IsDir() {
+					return nil
+				}
+				if f, err := os.Open(path); err == nil {
+					if !yield(f) {
+						return done
+					}
+				}
+				return nil
+			})
+			if err == done {
+				return
+			}
+		}
+	}
 }
 
 func main() {
