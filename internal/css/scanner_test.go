@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -264,12 +265,26 @@ var scannerTests = []struct {
 func TestScanner(t *testing.T) {
 	for _, test := range scannerTests {
 		t.Run(test.name, func(t *testing.T) {
+			wantEnd := Location{Line: 1}
+			for i := 0; ; {
+				r, size := utf8.DecodeRuneInString(test.source[i:])
+				if size == 0 {
+					break
+				}
+				wantEnd = addLocation(wantEnd, []rune{r}, []int{size})
+				i += size
+			}
+
 			s := NewScanner(strings.NewReader(test.source))
 			var got []Token
 			for {
 				tok, err := s.Next()
 				if tok.Kind == EOFKind {
-					if want := (Token{}); !cmp.Equal(tok, want) {
+					want := (Token{
+						Kind:  EOFKind,
+						Start: wantEnd,
+					})
+					if !cmp.Equal(tok, want) {
 						t.Errorf("final token = %+v; want %+v", tok, want)
 					}
 					if err != io.EOF {
