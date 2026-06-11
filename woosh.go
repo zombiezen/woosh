@@ -60,9 +60,8 @@ func Process(dst io.Writer, opts *Options) error {
 				}
 				start := match[2]
 				end := match[3]
-				nextSearch := match[1]
 				foundMap[string(data[start:end])] = struct{}{}
-				data = data[nextSearch:]
+				data = data[end:]
 			}
 		}
 	}
@@ -181,6 +180,7 @@ func collectRegexp(classes iter.Seq[*utilityClass], variants iter.Seq[*variant],
 		expr.WriteString(`):)*`)
 	}
 
+	expr.WriteString(`(?:`)
 	first = true
 	for uc := range classes {
 		if first {
@@ -193,7 +193,7 @@ func collectRegexp(classes iter.Seq[*utilityClass], variants iter.Seq[*variant],
 		expr.WriteString(`)`)
 	}
 
-	expr.WriteString(`)(?:$|[ \t\r\n"',<>])`)
+	expr.WriteString(`))(?:$|[ \t\r\n"',<>])`)
 
 	re, err := regexp.Compile(expr.String())
 	if err != nil {

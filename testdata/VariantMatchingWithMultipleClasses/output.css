@@ -1,0 +1,13 @@
+.w-full {
+	width: 100%;
+}
+.lg\:mx-auto {
+	@media (width >= 940px) {
+		margin-inline: auto;
+	}
+}
+.lg\:mt-\[30px\] {
+	@media (width >= 940px) {
+		margin-top: 30px;
+	}
+}

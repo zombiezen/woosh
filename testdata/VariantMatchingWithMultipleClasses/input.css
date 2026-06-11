@@ -1,0 +1,16 @@
+@custom-variant lg {
+	@media (width >= 940px) {
+		@slot;
+	}
+}
+@utility w-full {
+	width: 100%;
+}
+@utility mx-* {
+	margin-inline: calc(var(--spacing) * --value(number));
+	margin-inline: --value([length], "auto");
+}
+@utility mt-* {
+	margin-top: calc(var(--spacing) * --value(number));
+	margin-top: --value([length], "auto");
+}
