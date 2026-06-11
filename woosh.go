@@ -71,9 +71,10 @@ func Process(dst io.Writer, opts *Options) error {
 
 	// Rewrite utility classes.
 	for _, layer := range s.layers {
-		for i := 0; i < len(layer.rules); i++ {
+		for i := 0; i < len(layer.rules); {
 			uc := s.classes[layer.rules[i].Rule]
 			if uc == nil {
+				i++
 				continue
 			}
 			source := layer.rules[i].url

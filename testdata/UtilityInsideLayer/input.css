@@ -4,4 +4,7 @@
   @utility text-blue {
 		color: blue;
   }
+  @utility text-green {
+		color: green;
+  }
 }

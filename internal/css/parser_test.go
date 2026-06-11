@@ -241,6 +241,58 @@ func TestSplitBlockContents(t *testing.T) {
 			},
 		},
 		{
+			name: "MultipleNestedRules",
+			css:  "font {}\np {}",
+			want: []BlockPart{
+				ToBlockPart(&Rule{
+					Prelude: []Token{
+						{
+							Kind:  IdentKind,
+							Value: "font",
+							Start: Location{Offset: 0, Line: 1},
+						},
+						{
+							Kind:  WhitespaceKind,
+							Start: Location{Offset: 4, Line: 1},
+						},
+					},
+					Block: Value{
+						{
+							Kind:  LBraceKind,
+							Start: Location{Offset: 5, Line: 1},
+						},
+						{
+							Kind:  RBraceKind,
+							Start: Location{Offset: 6, Line: 1},
+						},
+					},
+				}),
+				ToBlockPart(&Rule{
+					Prelude: []Token{
+						{
+							Kind:  IdentKind,
+							Value: "p",
+							Start: Location{Offset: 8, Line: 2},
+						},
+						{
+							Kind:  WhitespaceKind,
+							Start: Location{Offset: 9, Line: 2},
+						},
+					},
+					Block: Value{
+						{
+							Kind:  LBraceKind,
+							Start: Location{Offset: 10, Line: 2},
+						},
+						{
+							Kind:  RBraceKind,
+							Start: Location{Offset: 11, Line: 2},
+						},
+					},
+				}),
+			},
+		},
+		{
 			name: "NestedComplexSelectorRule",
 			css:  "font+foo {}",
 			want: []BlockPart{
