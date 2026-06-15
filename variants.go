@@ -96,13 +96,9 @@ func newVariant(rule fileRule) (*variant, error) {
 }
 
 // injectVariants wraps the block contents of the rule with the variant blocks.
-func injectVariants(variants []*variant, rule *css.Rule) {
-	if len(variants) == 0 {
-		return
-	}
-
+func injectVariants(variants iter.Seq[*variant], rule *css.Rule) {
 	wrapperCount := 0
-	for _, v := range variants {
+	for v := range variants {
 		wrapperCount += len(v.blocks)
 	}
 	if wrapperCount == 0 {
@@ -110,7 +106,7 @@ func injectVariants(variants []*variant, rule *css.Rule) {
 	}
 
 	var newBlock []css.Token
-	for _, v := range variants {
+	for v := range variants {
 		for _, wrapper := range v.blocks {
 			newBlock = append(newBlock,
 				css.Token{Kind: css.LBraceKind},

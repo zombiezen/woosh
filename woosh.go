@@ -7,6 +7,7 @@ package woosh
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -65,31 +66,46 @@ func Process(dst io.Writer, opts *Options) error {
 			}
 		}
 	}
-	found := slices.AppendSeq(make([]string, 0, len(foundMap)), maps.Keys(foundMap))
-	slices.Sort(found)
+	found := s.groupClassNames(maps.Keys(foundMap))
 
-	// Rewrite utility classes.
+	// Rewrite utilities in layers.
+	// We do this here rather than during output,
+	// since we need to do a pass to detect variables.
 	for _, layer := range s.layers {
+		var newRules []fileRule
+		hasUtilities := false
 		for i := 0; i < len(layer.rules); {
-			uc := s.classes[layer.rules[i].Rule]
-			if uc == nil {
+			n := s.utilityRunLength(layer.rules[i:])
+			if n == 0 {
+				if hasUtilities {
+					newRules = append(newRules, layer.rules[i])
+				}
 				i++
 				continue
 			}
-			source := layer.rules[i].url
-			layer.rules = slices.Delete(layer.rules, i, i+1)
-			for _, fullClassName := range found {
-				variants, className := s.trimVariants(fullClassName)
-				variantPrefixLength := len(fullClassName) - len(className)
-				if newRule := uc.expand(fullClassName, variantPrefixLength, valueOpts); newRule != nil {
-					injectVariants(variants, newRule)
-					layer.rules = slices.Insert(layer.rules, i, fileRule{
-						Rule: newRule,
-						url:  source,
-					})
-					i++
+
+			if !hasUtilities {
+				newRules = slices.Clone(layer.rules[:i])
+				hasUtilities = true
+			}
+			var utilities iter.Seq[*utilityClass] = func(yield func(*utilityClass) bool) {
+				for _, fr := range layer.rules[i : i+n] {
+					if !yield(s.classes[fr.Rule]) {
+						return
+					}
 				}
 			}
+			for rule := range s.substituteUtilities(found, utilities, valueOpts) {
+				newRules = append(newRules, fileRule{
+					Rule: rule,
+					url:  layer.rules[i].url,
+				})
+			}
+			i += n
+		}
+
+		if hasUtilities {
+			layer.rules = newRules
 		}
 	}
 
@@ -127,16 +143,16 @@ func Process(dst io.Writer, opts *Options) error {
 			}
 		}
 
-		for _, rule := range layer.rules {
-			ruleToWrite := rule.Rule
+		for i := range layer.rules {
+			rule := layer.rules[i].Rule
 			if css.EqualCaseInsensitive(rule.AtRule, "theme") {
-				rootRule := rewriteThemeRule(rule.Rule, usedVariableNames)
+				rootRule := rewriteThemeRule(rule, usedVariableNames)
 				if rootRule == nil {
 					continue
 				}
-				ruleToWrite = rootRule
+				rule = rootRule
 			}
-			if err := writeTokenSeq(w, ruleToWrite.Tokens()); err != nil {
+			if err := writeTokenSeq(w, rule.Tokens()); err != nil {
 				return err
 			}
 			if err := w.WriteToken(css.Token{Kind: css.WhitespaceKind}); err != nil {
@@ -342,6 +358,26 @@ func (s *state) process(l *layer, rule fileRule) error {
 	return nil
 }
 
+// substituteUtilities returns an iterator over the expanded utility classes that match
+// for each group in found.
+func (s *state) substituteUtilities(found []classGroup, classes iter.Seq[*utilityClass], valueOpts *valueFunctionOptions) iter.Seq[*css.Rule] {
+	return func(yield func(*css.Rule) bool) {
+		for _, grp := range found {
+			variants := s.variantsIn(grp.variantPrefix)
+			for uc := range classes {
+				for _, fullClassName := range grp.names {
+					if newRule := uc.expand(fullClassName, len(grp.variantPrefix), valueOpts); newRule != nil {
+						injectVariants(variants, newRule)
+						if !yield(newRule) {
+							return
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 // themePropertyNames returns the property names that appear in @theme rules
 // in layer order.
 func (s *state) themePropertyNames() iter.Seq[string] {
@@ -420,6 +456,24 @@ func (s *state) usedVariableNames() map[string]struct{} {
 	}
 }
 
+// utilityRunLength returns the index of the first rule in seq that does not have a class
+// or doesn't match the first rule's source URL.
+// If no such rule exists, utilityRunLength returns len(seq).
+func (s *state) utilityRunLength(seq []fileRule) int {
+	var urlstr string
+	for i, rule := range seq {
+		if s.classes[rule.Rule] == nil {
+			return i
+		}
+		if i == 0 {
+			urlstr = rule.url.String()
+		} else if rule.url.String() != urlstr {
+			return i
+		}
+	}
+	return len(seq)
+}
+
 func (s *state) getOrCreateLayer(name string) *layer {
 	i := -1
 	if name != "" {
@@ -435,25 +489,77 @@ func (s *state) getOrCreateLayer(name string) *layer {
 	return importLayer
 }
 
-func (s *state) trimVariants(className string) (variants []*variant, utility string) {
-	sepCount := strings.Count(className, ":")
-	if sepCount == 0 {
-		return nil, className
+// groupClassNames groups the class names by their variants.
+// The groups are sorted by ascending variant specificity
+// and class names are sorted lexicographically within each group.
+func (s *state) groupClassNames(classNames iter.Seq[string]) []classGroup {
+	var result []classGroup
+	for name := range classNames {
+		variantPrefix := name[:s.variantPrefixLength(name)]
+		i, ok := slices.BinarySearchFunc(result, variantPrefix, func(grp classGroup, variantPrefix string) int {
+			grpVariantCount := strings.Count(grp.variantPrefix, variantSep)
+			variantCount := strings.Count(variantPrefix, variantSep)
+			return cmp.Or(
+				cmp.Compare(grpVariantCount, variantCount),
+				cmp.Compare(grp.variantPrefix, variantPrefix),
+			)
+		})
+		if !ok {
+			result = slices.Insert(result, i, classGroup{variantPrefix: variantPrefix})
+		}
+		result[i].names = append(result[i].names, name)
 	}
+	for i := range result {
+		grp := &result[i]
+		slices.Sort(grp.names)
+		grp.names = slices.Compact(grp.names)
+	}
+	return result
+}
 
-	variants = make([]*variant, 0, sepCount)
-	for {
-		vname, tail, hasSep := strings.Cut(className, ":")
-		if !hasSep {
-			return variants, className
+// variantSep is the separator between variants in a class name.
+const variantSep = ":"
+
+// variantsIn returns an iterator over the variants registered in the [state]
+// in the order they appear in className.
+func (s *state) variantsIn(className string) iter.Seq[*variant] {
+	return func(yield func(*variant) bool) {
+		i := 0
+		for {
+			n := strings.Index(className[i:], variantSep)
+			if n < 0 {
+				return
+			}
+			v := s.variants[className[i:i+n]]
+			if v == nil {
+				return
+			}
+			if !yield(v) {
+				return
+			}
+			i += n + len(variantSep)
 		}
-		v := s.variants[vname]
-		if v == nil {
-			return variants, className
-		}
-		variants = append(variants, v)
-		className = tail
 	}
+}
+
+// variantPrefixLength returns the index of the first byte in className
+// that is not part of a variant registered in the [state].
+func (s *state) variantPrefixLength(className string) int {
+	i := 0
+	for {
+		n := strings.Index(className[i:], variantSep)
+		if n < 0 || s.variants[className[i:i+n]] == nil {
+			return i
+		}
+		i += n + len(variantSep)
+	}
+}
+
+// classGroup is a group of class names returned by [*state.groupClassNames]
+// that all start with the same variant prefix.
+type classGroup struct {
+	variantPrefix string
+	names         []string
 }
 
 type layer struct {

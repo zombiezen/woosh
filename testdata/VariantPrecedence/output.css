@@ -1,0 +1,11 @@
+:root {
+	--spacing: 0.25rem;
+}
+.w-full {
+	width: 100%;
+}
+.lg\:w-100 {
+	@media (width >= 940px) {
+		width: calc(var(--spacing) * 100);
+	}
+}

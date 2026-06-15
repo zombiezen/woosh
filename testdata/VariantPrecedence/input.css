@@ -1,0 +1,14 @@
+@theme {
+	--spacing: 0.25rem;
+}
+@custom-variant lg {
+	@media (width >= 940px) {
+		@slot;
+	}
+}
+@utility w-* {
+	width: calc(var(--spacing) * --value(number));
+}
+@utility w-full {
+	width: 100%;
+}
