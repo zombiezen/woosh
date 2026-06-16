@@ -409,16 +409,21 @@ func (s *state) usedVariableNames() map[string]struct{} {
 	result := make(map[string]struct{})
 	findReferences := func(tokens []css.Token) {
 		for i := 0; i < len(tokens); {
-			if tokens[i].IsFunction("var") {
-				if n, ok := css.ValueLength(tokens[i:]); ok {
-					if n == 3 && tokens[i+1].Kind == css.IdentKind {
-						result[tokens[i+1].Value] = struct{}{}
-					}
-					i += n
-					continue
-				}
+			if !tokens[i].IsFunction("var") {
+				i++
+				continue
 			}
-			i++
+			n, ok := css.ValueLength(tokens[i:])
+			if !ok {
+				i++
+				continue
+			}
+			variableName, fallbackStart, ok := varFunctionPropertyName(tokens[i : i+n])
+			if ok {
+				result[variableName] = struct{}{}
+			}
+			i += fallbackStart
+			continue
 		}
 	}
 
@@ -454,6 +459,37 @@ func (s *state) usedVariableNames() map[string]struct{} {
 			return result
 		}
 	}
+}
+
+// varFunctionPropertyName parses a [var() CSS function]
+// and returns its property name
+// and the index of the first token in value after the first comma in the var() function
+// or the length of the value.
+// ok is true if and only if the value represents a var() function
+// that starts with a custom property name as its first comma-separated argument.
+//
+// [var() CSS function]: https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/var
+func varFunctionPropertyName(value css.Value) (propertyName string, end int, ok bool) {
+	if len(value) == 0 || !value[0].IsFunction("var") {
+		return "", 0, false
+	}
+	i := 1
+	for i < len(value) && value[i].Kind == css.WhitespaceKind {
+		i++
+	}
+	if i >= len(value) || value[i].Kind != css.IdentKind || !strings.HasPrefix(value[i].Value, "--") {
+		return "", i, false
+	}
+	propertyName = value[i].Value
+	i++
+	for i < len(value) && value[i].Kind == css.WhitespaceKind {
+		i++
+	}
+	if i < len(value) && (value[i].Kind == css.CommaKind || value[i].Kind == css.RParenKind && i == len(value)-1) {
+		i++
+		return propertyName, i, true
+	}
+	return propertyName, i, false
 }
 
 // utilityRunLength returns the index of the first rule in seq that does not have a class
