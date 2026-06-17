@@ -77,6 +77,23 @@ func TestWriter(t *testing.T) {
 				"\tcolor: blue;\n" +
 				"}\n",
 		},
+		{
+			name: "Hash",
+			tokens: []Token{
+				{Kind: IdentKind, Value: "color"},
+				{Kind: ColonKind},
+				{Kind: WhitespaceKind},
+				{Kind: HashKind, Value: "000"},
+			},
+			want: "color: #000",
+		},
+		{
+			name: "FancyIdent",
+			tokens: []Token{
+				{Kind: IdentKind, Value: "000"},
+			},
+			want: `\30 00`,
+		},
 	}
 
 	for _, test := range tests {

@@ -99,11 +99,7 @@ func (w *Writer) WriteToken(tok Token) (err error) {
 			return err
 		}
 	case HashKind:
-		if _, err := w.w.WriteString("#"); err != nil {
-			return err
-		}
-		// TODO(maybe): Is this the right escaping?
-		if err := writeIdent(w.w, tok.Value); err != nil {
+		if err := writeHash(w.w, tok.Value); err != nil {
 			return err
 		}
 	case StringKind, BadStringKind:
@@ -250,6 +246,22 @@ func writeIdent(w stringWriter, s string) error {
 	}
 	// Now the rest of the string can be escaped uniformly.
 	return escape(w, s, func(r rune) bool { return !isIdent(r) })
+}
+
+func writeHash(w stringWriter, value string) error {
+	if len(value) == 0 {
+		return errors.New("write token: empty hash")
+	}
+	if _, err := w.WriteString("#"); err != nil {
+		return err
+	}
+	for _, r := range value {
+		if !isIdent(r) {
+			return escape(w, value, func(r rune) bool { return !isIdent(r) })
+		}
+	}
+	_, err := w.WriteString(value)
+	return err
 }
 
 // escape writes s to w, escaping every rune for which needsEscape reports true

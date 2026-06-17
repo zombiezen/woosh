@@ -176,6 +176,15 @@ var scannerTests = []struct {
 		},
 	},
 	{
+		name:   "AllZeroHexCode",
+		source: `background-color:#000`,
+		want: []Token{
+			{Kind: IdentKind, Value: "background-color", Start: Location{Line: 1, Offset: 0}},
+			{Kind: ColonKind, Start: Location{Line: 1, Offset: 16}},
+			{Kind: HashKind, Value: "000", Start: Location{Line: 1, Offset: 17}},
+		},
+	},
+	{
 		name:   "AttributeSelector",
 		source: `a[class~="logo"]`,
 		want: []Token{
